@@ -1,15 +1,78 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger, ActionExample } from "@elizaos/core";
 
+interface DiscoveryState {
+    currentStage: string;
+    questionsAsked: string[];
+    identifiedNeeds: string[];
+    lastResponse: string;
+}
+
+interface ExtendedRuntime extends IAgentRuntime {
+    getState(key: string): Promise<any>;
+    setState(key: string, value: any): Promise<void>;
+}
+
+async function getDiscoveryState(runtime: ExtendedRuntime, message: Memory): Promise<DiscoveryState> {
+    const state = await runtime.getState("discovery") as DiscoveryState;
+    return state || {
+        currentStage: "trust_building",
+        questionsAsked: [],
+        identifiedNeeds: [],
+        lastResponse: ""
+    };
+}
+
+async function updateDiscoveryState(
+    runtime: ExtendedRuntime, 
+    message: Memory, 
+    stage: string, 
+    response: string
+): Promise<void> {
+    const state = await getDiscoveryState(runtime, message);
+    state.currentStage = stage;
+    state.lastResponse = response;
+    await runtime.setState("discovery", state);
+}
+
+async function determineConversationStage(
+    runtime: ExtendedRuntime,
+    message: Memory,
+    discoveryState: DiscoveryState
+): Promise<string> {
+    // If we're in the middle of a stage, stay there
+    if (discoveryState.currentStage !== "trust_building") {
+        return discoveryState.currentStage;
+    }
+
+    // Check if we've completed trust building
+    const trustBuildingComplete = discoveryState.questionsAsked.length > 0;
+    return trustBuildingComplete ? "situation_discovery" : "trust_building";
+}
+
+async function moveToNextStage(
+    runtime: ExtendedRuntime,
+    message: Memory,
+    state: State,
+    nextStage: string
+): Promise<string> {
+    await updateDiscoveryState(runtime, message, nextStage, "");
+    return "";
+}
+
+async function handleGeneralInquiry(runtime: ExtendedRuntime, message: Memory, state: State): Promise<string> {
+    return "I understand you're interested in learning more about Grand Villa. Let me help guide you through what makes our community special. Could you tell me what brought you to look into senior living options today?";
+}
+
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
     description: "Guide families through the Sherpa discovery process for Grand Villa",
     similes: ["SENIOR_LIVING_GUIDE", "GRAND_VILLA", "COMMUNITY_DISCOVERY", "FACILITY_EXPLORATION", "SENIOR_CARE_OPTIONS"],
     examples: [],
-    validate: async (_runtime: IAgentRuntime, _message: Memory) => {
+    validate: async (_runtime: ExtendedRuntime, _message: Memory) => {
         return true;
     },
     handler: async (
-        _runtime: IAgentRuntime,
+        _runtime: ExtendedRuntime,
         _message: Memory,
         _state: State,
         _options: { [key:string]: unknown},
@@ -35,23 +98,18 @@ export const grandVillaDiscoveryAction: Action = {
             case "lifestyle_discovery":
                 response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState);
                 break;
-
             case "readiness_discovery":
                 response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState);
                 break;
-
             case "priorities_discovery":
                 response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState);
                 break;
-                
             case "needs_matching":
                 response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState);
                 break;
-                
             case "visit_transition":
                 response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState);
                 break;
-            
             default:
                 response_text = await handleGeneralInquiry(_runtime, _message, _state);
         }
@@ -63,26 +121,35 @@ export const grandVillaDiscoveryAction: Action = {
     }
 }
 
-async function handleTrustBuilding(runtime: IAgentRuntime, message: Memory, state: State): Promise<string> {
-    return "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
+async function handleTrustBuilding(runtime: ExtendedRuntime, message: Memory, state: State): Promise<string> {
+    const discoveryState = await getDiscoveryState(runtime, message);
+    if (!discoveryState.questionsAsked.includes("initial_trust")) {
+        discoveryState.questionsAsked.push("initial_trust");
+        await updateDiscoveryState(runtime, message, "trust_building", "");
+        return "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
+    }
+    return await moveToNextStage(runtime, message, state, "situation_discovery");
 }
 
-async function handleSituationQuestions(runtime: IAgentRuntime, message: Memory, state: State, discoveryState: any): Promise<string> {
+async function handleSituationQuestions(runtime: ExtendedRuntime, message: Memory, state: State, discoveryState: DiscoveryState): Promise<string> {
     const unansweredQuestions = [
         "What made you decide to call us today?",
         "What's your greatest concern right now?", 
         "How is this situation impacting your family?"
-    ].filter(q => !discoveryState.questions.includes(q));
+    ].filter(q => !discoveryState.questionsAsked.includes(q));
 
     if (unansweredQuestions.length > 0) {
         const question = unansweredQuestions[0];
+        discoveryState.questionsAsked.push(question);
+        await updateDiscoveryState(runtime, message, "situation_discovery", question);
+        return question;
     }
 
     return "Thank you for sharing that." + await moveToNextStage(runtime, message, state, "lifestyle_discovery");
 }
 
 // Lifestyle Discovery Handler  
-async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleLifestyleQuestions(runtime: ExtendedRuntime, message: Memory, state: State, discoveryState: DiscoveryState): Promise<string> {
     const unansweredQuestions = [
         "Tell me about your Mom or Dad. What does a typical day look like for them?",
         "What are some things they love doing?",
@@ -90,13 +157,16 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
     if (unansweredQuestions.length > 0) {
-        return unansweredQuestions[0];
+        const question = unansweredQuestions[0];
+        discoveryState.questionsAsked.push(question);
+        await updateDiscoveryState(runtime, message, "lifestyle_discovery", question);
+        return question;
     }
     
-    return await moveToNextStage(_runtime, _message, "readiness_discovery");
+    return await moveToNextStage(runtime, message, state, "readiness_discovery");
 }
 
-async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleReadinessQuestions(runtime: ExtendedRuntime, message: Memory, state: State, discoveryState: DiscoveryState): Promise<string> {
     const unansweredQuestions = [
         "Is your Mom or Dad aware that you're looking at options?",
         "How do they feel about the idea of moving?",
@@ -104,27 +174,33 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
     if (unansweredQuestions.length > 0) {
-        return unansweredQuestions[0];
+        const question = unansweredQuestions[0];
+        discoveryState.questionsAsked.push(question);
+        await updateDiscoveryState(runtime, message, "readiness_discovery", question);
+        return question;
     }
     
-    return await moveToNextStage(_runtime, _message, "priorities_discovery");
+    return await moveToNextStage(runtime, message, state, "priorities_discovery");
 }
 
 // Priority Discovery Handler
-async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handlePriorityQuestions(runtime: ExtendedRuntime, message: Memory, state: State, discoveryState: DiscoveryState): Promise<string> {
     const unansweredQuestions = [
         "What's most important to you in the community you choose?",
         "What kind of support do you feel would make the biggest difference for your family?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
     if (unansweredQuestions.length > 0) {
-        return unansweredQuestions[0];
+        const question = unansweredQuestions[0];
+        discoveryState.questionsAsked.push(question);
+        await updateDiscoveryState(runtime, message, "priorities_discovery", question);
+        return question;
     }
     
-    return await moveToNextStage(_runtime, _message, "needs_matching");
+    return await moveToNextStage(runtime, message, state, "needs_matching");
 }
 
-async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleNeedsMatching(runtime: ExtendedRuntime, message: Memory, state: State, discoveryState: DiscoveryState): Promise<string> {
     const identifiedNeeds = discoveryState.identifiedNeeds || [];
     
     // Hard-coded Grand Villa features for MVP
@@ -160,11 +236,11 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
          matchedFeatures.push(grandVillaFeatures.independence); // Default
      }
      
-     const response = matchedFeatures.join("\n\n") + "\n\n" + await moveToNextStage(_runtime, _message, "visit_transition");
+     const response = matchedFeatures.join("\n\n") + "\n\n" + await moveToNextStage(runtime, message, state, "visit_transition");
      return response;
  }
 
  // Visit Transition Handler
-async function handleVisitTransition(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleVisitTransition(runtime: ExtendedRuntime, message: Memory, state: State, discoveryState: DiscoveryState): Promise<string> {
     return "It sounds like your family member could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like.\n\nWould Wednesday afternoon or Friday morning work better for you?";
 }
