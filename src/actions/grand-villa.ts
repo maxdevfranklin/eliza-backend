@@ -1,9 +1,9 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger, ActionExample } from "@elizaos/core";
 
-export const grandVillaAction: Action = {
-    name: "grand-villa",
-    description: "Guide users in discovering Grand Villa senior living communities and facilities",
-    similes: ["SENIOR_LIVING_GUIDE", "COMMUNITY_DISCOVERY", "FACILITY_EXPLORATION", "SENIOR_CARE_OPTIONS"],
+export const grandVillaDiscoveryAction: Action = {
+    name: "grand-villa-discovery",
+    description: "Guide families through the Sherpa discovery process for Grand Villa",
+    similes: ["SENIOR_LIVING_GUIDE", "GRAND_VILLA", "COMMUNITY_DISCOVERY", "FACILITY_EXPLORATION", "SENIOR_CARE_OPTIONS"],
     examples: [],
     validate: async (_runtime: IAgentRuntime, _message: Memory) => {
         return true;
@@ -16,62 +16,155 @@ export const grandVillaAction: Action = {
         _callback: HandlerCallback
     ) => {
         elizaLogger.info("Starting Grand Villa action handler");
-        const context = `Analyze the user's message to understand their specific needs and interests regarding senior living.
-                        The message is: ${_message.content.text}
-                        Determine if they are interested in: communities, activities, living-options, or general information.
-                        Only respond with one of: communities, activities, living-options, or general.
-                        No other text.`;
+        
+        //Get Current discovery state
+        const discoveryState = await getDiscoveryState(_runtime, _message);
 
-        const aspect = await generateText({
-            runtime: _runtime,
-            context,
-            modelClass: ModelClass.SMALL,
-            stop: ["\n"],
-        });
+        //Determine conversation stage and next action
+        const conversationStage = await determineConversationStage(_runtime, _message, discoveryState);
 
         let response_text = "";
 
-        switch(aspect.trim()) {
-            case "communities":
-                response_text = "I'd be happy to tell you about Grand Villa communities! We have beautiful, well-maintained communities designed specifically for seniors. Here's what makes our communities special:\n\n" +
-                              "• Spacious, comfortable living spaces with emergency response systems\n" +
-                              "• Restaurant-style dining with chef-prepared meals\n" +
-                              "• Regular housekeeping and maintenance services\n" +
-                              "• 24-hour staff availability for peace of mind\n" +
-                              "• Beautiful grounds and common areas for socializing\n\n" +
-                              "Would you like to know more about our activities, living options, or would you like to schedule a tour?";
+        switch(conversationStage) {
+            case "trust_building":
+                response_text = await handleTrustBuilding(_runtime, _message, _state);
                 break;
-            case "activities":
-                response_text = "At Grand Villa, we believe staying active and engaged is key to a fulfilling lifestyle. Here's what residents enjoy:\n\n" +
-                              "• Daily exercise and fitness classes to stay healthy\n" +
-                              "• Arts and crafts workshops for creative expression\n" +
-                              "• Music and entertainment programs\n" +
-                              "• Social events and parties to build friendships\n" +
-                              "• Group outings and excursions\n" +
-                              "• Game nights and bingo for fun\n" +
-                              "• Book clubs and discussion groups\n\n" +
-                              "Would you like to learn more about our communities or the different living options we offer?";
+            case "situation_discovery":
+                response_text = await handleSituationQuestions(_runtime, _message, _state, discoveryState);
                 break;
-            case "living-options":
-                response_text = "Grand Villa offers various living options to meet different needs and preferences:\n\n" +
-                              "• Independent Living: Perfect for active seniors who want maintenance-free living with access to amenities and social activities\n" +
-                              "• Assisted Living: For those who need some help with daily activities while maintaining independence\n" +
-                              "• Memory Care: Specialized care and support for residents with memory-related conditions\n" +
-                              "• Respite Care: Short-term stays for temporary care needs\n\n" +
-                              "Would you like to know more about any of these options or would you like to hear about our communities?";
+            case "lifestyle_discovery":
+                response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState);
                 break;
+
+            case "readiness_discovery":
+                response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState);
+                break;
+
+            case "priorities_discovery":
+                response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState);
+                break;
+                
+            case "needs_matching":
+                response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState);
+                break;
+                
+            case "visit_transition":
+                response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState);
+                break;
+            
             default:
-                response_text = "I'd love to help you explore senior living options! Grand Villa is a premier senior living community that offers a perfect blend of comfort, care, and engaging activities. " +
-                              "We understand that finding the right senior living solution is an important decision, and we're here to help guide you through the process. " +
-                              "Would you like to know more about:\n\n" +
-                              "• Our communities and facilities\n" +
-                              "• The activities and lifestyle we offer\n" +
-                              "• Our different living options\n" +
-                              "• How to schedule a tour\n\n" +
-                              "What interests you most?";
+                response_text = await handleGeneralInquiry(_runtime, _message, _state);
         }
+
+        await updateDiscoveryState(_runtime, _message, conversationStage, response_text);
 
         _callback({text: response_text});
         return true;
     }
+}
+
+async function handleTrustBuilding(runtime: IAgentRuntime, message: Memory, state: State): Promise<string> {
+    return "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
+}
+
+async function handleSituationQuestions(runtime: IAgentRuntime, message: Memory, state: State, discoveryState: any): Promise<string> {
+    const unansweredQuestions = [
+        "What made you decide to call us today?",
+        "What's your greatest concern right now?", 
+        "How is this situation impacting your family?"
+    ].filter(q => !discoveryState.questions.includes(q));
+
+    if (unansweredQuestions.length > 0) {
+        const question = unansweredQuestions[0];
+    }
+
+    return "Thank you for sharing that." + await moveToNextStage(runtime, message, state, "lifestyle_discovery");
+}
+
+// Lifestyle Discovery Handler  
+async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    const unansweredQuestions = [
+        "Tell me about your Mom or Dad. What does a typical day look like for them?",
+        "What are some things they love doing?",
+        "What's something they've always enjoyed but may have stopped doing recently?"
+    ].filter(q => !discoveryState.questionsAsked.includes(q));
+    
+    if (unansweredQuestions.length > 0) {
+        return unansweredQuestions[0];
+    }
+    
+    return await moveToNextStage(_runtime, _message, "readiness_discovery");
+}
+
+async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    const unansweredQuestions = [
+        "Is your Mom or Dad aware that you're looking at options?",
+        "How do they feel about the idea of moving?",
+        "Who else is involved in helping make this decision?"
+    ].filter(q => !discoveryState.questionsAsked.includes(q));
+    
+    if (unansweredQuestions.length > 0) {
+        return unansweredQuestions[0];
+    }
+    
+    return await moveToNextStage(_runtime, _message, "priorities_discovery");
+}
+
+// Priority Discovery Handler
+async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    const unansweredQuestions = [
+        "What's most important to you in the community you choose?",
+        "What kind of support do you feel would make the biggest difference for your family?"
+    ].filter(q => !discoveryState.questionsAsked.includes(q));
+    
+    if (unansweredQuestions.length > 0) {
+        return unansweredQuestions[0];
+    }
+    
+    return await moveToNextStage(_runtime, _message, "needs_matching");
+}
+
+async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    const identifiedNeeds = discoveryState.identifiedNeeds || [];
+    
+    // Hard-coded Grand Villa features for MVP
+    const grandVillaFeatures = {
+        dining: "Since you mentioned that making sure your mom eats well is important, I think you'll love learning more about our chef-prepared meals. We focus on fresh, nutritious options, and residents enjoy a social dining experience, which often improves appetite and overall well-being.",
+        
+        activities: "Since your dad used to love gardening, I think he'd really enjoy our resident-led gardening club. It's a great way for him to do something he enjoys while meeting new people in a relaxed setting.",
+        
+        safety: "Since your mom has had a few falls recently, I want to highlight the extra safety measures in place here—like our emergency response system and 24/7 trained staff. That way, she has independence but also support when needed.",
+        
+        social: "I can see that staying socially connected is important. Our community really focuses on building friendships through shared meals, group activities, and common spaces where residents naturally gather.",
+        
+        independence: "It sounds like maintaining independence is crucial. Grand Villa is designed to support that—residents have their own apartments but can access help when they need it."
+    };
+
+     // Match needs to features (simplified for MVP)
+     let matchedFeatures = [];
+    
+     if (identifiedNeeds.includes("nutrition") || identifiedNeeds.includes("eating") || identifiedNeeds.includes("meals")) {
+         matchedFeatures.push(grandVillaFeatures.dining);
+     }
+     if (identifiedNeeds.includes("activities") || identifiedNeeds.includes("hobbies") || identifiedNeeds.includes("gardening")) {
+         matchedFeatures.push(grandVillaFeatures.activities);
+     }
+     if (identifiedNeeds.includes("safety") || identifiedNeeds.includes("falls") || identifiedNeeds.includes("emergency")) {
+         matchedFeatures.push(grandVillaFeatures.safety);
+     }
+     if (identifiedNeeds.includes("social") || identifiedNeeds.includes("lonely") || identifiedNeeds.includes("friends")) {
+         matchedFeatures.push(grandVillaFeatures.social);
+     }
+     
+     if (matchedFeatures.length === 0) {
+         matchedFeatures.push(grandVillaFeatures.independence); // Default
+     }
+     
+     const response = matchedFeatures.join("\n\n") + "\n\n" + await moveToNextStage(_runtime, _message, "visit_transition");
+     return response;
+ }
+
+ // Visit Transition Handler
+async function handleVisitTransition(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    return "It sounds like your family member could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like.\n\nWould Wednesday afternoon or Friday morning work better for you?";
 }
