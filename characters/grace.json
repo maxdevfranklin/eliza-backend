@@ -2,7 +2,7 @@
   "name": "Graace",
   "plugins": [],
   "clients": [],
-  "modelProvider": "anthropic",
+  "modelProvider": "openai",
   "settings": {
     "secrets": {},
     "voice": {
