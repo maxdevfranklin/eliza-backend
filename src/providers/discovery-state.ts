@@ -8,7 +8,13 @@ const VALID_STAGES = [
     "priorities_discovery",
     "needs_matching",
     "visit_transition"
-];
+] as const;
+
+type Stage = typeof VALID_STAGES[number];
+
+interface MessageMetadata {
+    stage?: Stage;
+}
 
 export const discoveryStateProvider: Provider = {
     get: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
@@ -26,7 +32,7 @@ export const discoveryStateProvider: Provider = {
         
         // Parse previous conversation for discovery state
         const discoveryState = {
-            currentStage: "trust_building",
+            currentStage: "trust_building" as Stage,
             questionsAsked: [],
             identifiedNeeds: [],
             concernsShared: [],
@@ -39,14 +45,12 @@ export const discoveryStateProvider: Provider = {
             const text = mem.content.text?.toLowerCase() || "";
             elizaLogger.info(`Processing message: ${text}`);
             
-            // Check for stage transitions
-            if (text.includes("moving to stage:")) {
-                const stage = text.split("moving to stage:")[1]?.trim();
-                if (stage && VALID_STAGES.includes(stage)) {
-                    elizaLogger.info(`Found stage transition to: ${stage}`);
-                    discoveryState.currentStage = stage;
-                    continue; // Skip other processing for stage transition messages
-                }
+            // Check for stage in metadata first
+            const metadata = mem.content.metadata as MessageMetadata | undefined;
+            if (metadata?.stage && VALID_STAGES.includes(metadata.stage)) {
+                elizaLogger.info(`Found stage transition in metadata to: ${metadata.stage}`);
+                discoveryState.currentStage = metadata.stage;
+                continue;
             }
             
             // Only process questions and needs if we're in the appropriate stage
@@ -69,7 +73,7 @@ export const discoveryStateProvider: Provider = {
             }
             
             // Track identified needs only after situation discovery
-            if (discoveryState.currentStage !== "trust_building" && discoveryState.currentStage !== "situation_discovery") {
+            if (!["trust_building", "situation_discovery"].includes(discoveryState.currentStage)) {
                 if (text.includes("eat") || text.includes("meal") || text.includes("food") || text.includes("nutrition")) {
                     discoveryState.identifiedNeeds.push("nutrition");
                 }

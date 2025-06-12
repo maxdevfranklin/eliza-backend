@@ -92,25 +92,20 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
     elizaLogger.info("Handling trust building stage");
     const response = "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
     
-    // Store the response and stage transition
+    // Store the response and stage transition in a single message
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
-        content: { text: response }
+        content: { 
+            text: response,
+            metadata: {
+                stage: "situation_discovery"
+            }
+        }
     });
     
-    // Explicitly set the next stage
-    const discoveryState = await getDiscoveryState(_runtime, _message);
-    discoveryState.currentStage = "situation_discovery";
-    
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: { text: "Moving to situation discovery stage" }
-    });
-    
+    elizaLogger.info(`Stored response and stage transition to situation_discovery`);
     return response;
 }
 
@@ -228,15 +223,20 @@ async function updateDiscoveryState(_runtime: IAgentRuntime, _message: Memory, s
     const discoveryState = await getDiscoveryState(_runtime, _message);
     elizaLogger.info(`Updating discovery state from ${discoveryState.currentStage} to ${stage}`);
     
-    // Store the response in message history which will be used to update state
+    // Store the response with stage in metadata
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
-        content: { text: response }
+        content: { 
+            text: response,
+            metadata: {
+                stage: stage
+            }
+        }
     });
     
-    elizaLogger.info(`Added response to message history: ${response}`);
+    elizaLogger.info(`Added response to message history with stage: ${stage}`);
 }
 
 async function determineConversationStage(_runtime: IAgentRuntime, _message: Memory, discoveryState: any): Promise<string> {
