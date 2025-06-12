@@ -80,7 +80,7 @@ export const grandVillaDiscoveryAction: Action = {
         }
         
         // Update discovery state
-        await updateDiscoveryState(_runtime, _message, conversationStage, response_text);
+        // await updateDiscoveryState(_runtime, _message, conversationStage, response_text);
         
         _callback({ text: response_text });
         return true;
@@ -125,18 +125,19 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         // If all have been asked, just thank and move on
         question = "Thank you for sharing that with me.";
     }
-    // Store the asked question in memory
+    // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
         content: {
             text: question,
-            metadata: { askedQuestion: question }
+            metadata: { 
+                askedQuestion: question,
+                stage: "lifestyle_discovery"  // Set the next stage in metadata
+            }
         }
     });
-    // Move to next stage regardless
-    await moveToNextStage(_runtime, _message, "lifestyle_discovery");
     return question;
 }
 
@@ -154,16 +155,20 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     } else {
         question = "Thank you for sharing that with me.";
     }
+
+    // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
         content: {
             text: question,
-            metadata: { askedQuestion: question }
+            metadata: { 
+                askedQuestion: question,
+                stage: "readiness_discovery"  // Set the next stage in metadata
+            }
         }
     });
-    await moveToNextStage(_runtime, _message, "readiness_discovery");
     return question;
 }
 
@@ -181,16 +186,19 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     } else {
         question = "Thank you for sharing that with me.";
     }
+    // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
         content: {
             text: question,
-            metadata: { askedQuestion: question }
+            metadata: { 
+                askedQuestion: question,
+                stage: "priorities_discovery"  // Set the next stage in metadata
+            }
         }
     });
-    await moveToNextStage(_runtime, _message, "priorities_discovery");
     return question;
 }
 
@@ -207,16 +215,19 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     } else {
         question = "Thank you for sharing that with me.";
     }
+    // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
         content: {
             text: question,
-            metadata: { askedQuestion: question }
+            metadata: { 
+                askedQuestion: question,
+                stage: "needs_matching"  // Set the next stage in metadata
+            }
         }
     });
-    await moveToNextStage(_runtime, _message, "needs_matching");
     return question;
 }
 
@@ -275,20 +286,35 @@ async function updateDiscoveryState(_runtime: IAgentRuntime, _message: Memory, s
     const discoveryState = await getDiscoveryState(_runtime, _message);
     elizaLogger.info(`Updating discovery state from ${discoveryState.currentStage} to ${stage}`);
     
-    // Store the response with stage in metadata
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: { 
-            text: response,
-            metadata: {
-                stage: stage
+    // Only update stage if it's different from current stage
+    if (stage !== discoveryState.currentStage) {
+        // Store the response with stage in metadata
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: { 
+                text: response,
+                metadata: {
+                    stage: stage
+                }
             }
-        }
-    });
-    
-    elizaLogger.info(`Added response to message history with stage: ${stage}`);
+        });
+        
+        elizaLogger.info(`Added response to message history with stage: ${stage}`);
+    } else {
+        // If stage hasn't changed, just store the response without stage metadata
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: { 
+                text: response
+            }
+        });
+        
+        elizaLogger.info(`Added response to message history without stage change`);
+    }
 }
 
 async function determineConversationStage(_runtime: IAgentRuntime, _message: Memory, discoveryState: any): Promise<string> {
