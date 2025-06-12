@@ -36,15 +36,19 @@ export const grandVillaDiscoveryAction: Action = {
         
         // Get current discovery state
         const discoveryState = await getDiscoveryState(_runtime, _message);
+        elizaLogger.info(`Current discovery state in handler: ${JSON.stringify(discoveryState)}`);
         
         // Determine conversation stage and next action
         const conversationStage = await determineConversationStage(_runtime, _message, discoveryState);
+        elizaLogger.info(`Determined conversation stage: ${conversationStage}`);
         
         let response_text = "";
         
         switch (conversationStage) {
             case "trust_building":
+                elizaLogger.info("Entering trust_building case");
                 response_text = await handleTrustBuilding(_runtime, _message, _state);
+                elizaLogger.info(`Trust building response: ${response_text}`);
                 break;
                 
             case "situation_discovery":
@@ -85,7 +89,29 @@ export const grandVillaDiscoveryAction: Action = {
 
 // Trust Building Handler
 async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<string> {
-    return "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible." + await moveToNextStage(_runtime, _message, "situation_discovery");
+    elizaLogger.info("Handling trust building stage");
+    const response = "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
+    
+    // Store the response and stage transition
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: { text: response }
+    });
+    
+    // Explicitly set the next stage
+    const discoveryState = await getDiscoveryState(_runtime, _message);
+    discoveryState.currentStage = "situation_discovery";
+    
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: { text: "Moving to situation discovery stage" }
+    });
+    
+    return response;
 }
 
 // Situation Discovery Handler
@@ -200,33 +226,36 @@ async function getDiscoveryState(_runtime: IAgentRuntime, _message: Memory): Pro
 
 async function updateDiscoveryState(_runtime: IAgentRuntime, _message: Memory, stage: string, response: string): Promise<void> {
     const discoveryState = await getDiscoveryState(_runtime, _message);
-    discoveryState.currentStage = stage;
+    elizaLogger.info(`Updating discovery state from ${discoveryState.currentStage} to ${stage}`);
     
-    // Add the last response to questions asked if it was a question
-    if (response.endsWith("?")) {
-        discoveryState.questionsAsked.push(response);
-    }
-    
-    // Store the updated state in memory
-    await _runtime.messageManager.getMemories({
+    // Store the response in message history which will be used to update state
+    await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
-        count: 50,
-        unique: false
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: { text: response }
     });
+    
+    elizaLogger.info(`Added response to message history: ${response}`);
 }
 
 async function determineConversationStage(_runtime: IAgentRuntime, _message: Memory, discoveryState: any): Promise<string> {
+    elizaLogger.info(`Determining conversation stage with state: ${JSON.stringify(discoveryState)}`);
+    
     // If no state exists, start with trust building
     if (!discoveryState) {
+        elizaLogger.info("No discovery state found, starting with trust building");
         return "trust_building";
     }
 
     // If we have a current stage, stay in it until all questions are answered
     if (discoveryState.currentStage) {
+        elizaLogger.info(`Using existing stage: ${discoveryState.currentStage}`);
         return discoveryState.currentStage;
     }
 
     // Default to trust building
+    elizaLogger.info("Defaulting to trust building");
     return "trust_building";
 }
 
@@ -235,10 +264,11 @@ async function moveToNextStage(_runtime: IAgentRuntime, _message: Memory, nextSt
     discoveryState.currentStage = nextStage;
     
     // Store the stage transition in memory
-    await _runtime.messageManager.getMemories({
+    await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
-        count: 50,
-        unique: false
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: { text: `Moving to stage: ${nextStage}` }
     });
     
     return "";
