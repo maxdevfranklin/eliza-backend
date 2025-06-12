@@ -14,6 +14,7 @@ type Stage = typeof VALID_STAGES[number];
 
 interface MessageMetadata {
     stage?: Stage;
+    askedQuestion?: string;
 }
 
 export const discoveryStateProvider: Provider = {
@@ -49,8 +50,13 @@ export const discoveryStateProvider: Provider = {
             const metadata = mem.content.metadata as MessageMetadata | undefined;
             if (metadata?.stage && VALID_STAGES.includes(metadata.stage)) {
                 elizaLogger.info(`Found stage transition in metadata to: ${metadata.stage}`);
-                discoveryState.currentStage = metadata.stage;
+                // discoveryState.currentStage = metadata.stage;
                 continue;
+            }
+            
+            // Track asked questions from metadata
+            if (metadata?.askedQuestion) {
+                discoveryState.questionsAsked.push(metadata.askedQuestion);
             }
             
             // Only process questions and needs if we're in the appropriate stage
