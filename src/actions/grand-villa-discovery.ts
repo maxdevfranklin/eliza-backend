@@ -1,5 +1,5 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
-import { discoveryStateProvider } from "../providers/discovery-state";
+import { discoveryStateProvider } from "../providers/discovery-state.js";
 
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
@@ -19,6 +19,9 @@ export const grandVillaDiscoveryAction: Action = {
     ],
     
     validate: async (_runtime: IAgentRuntime, _message: Memory) => {
+        const discoveryState = await getDiscoveryState(_runtime, _message);
+        elizaLogger.info(`Discovery state: ${JSON.stringify(discoveryState)}`);
+        elizaLogger.info("Action is triggered");
         return true;
     },
     
@@ -82,7 +85,7 @@ export const grandVillaDiscoveryAction: Action = {
 
 // Trust Building Handler
 async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<string> {
-    return "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
+    return "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible." + await moveToNextStage(_runtime, _message, "situation_discovery");
 }
 
 // Situation Discovery Handler
