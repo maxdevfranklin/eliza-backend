@@ -39,12 +39,10 @@ export const newsAction: Action = {
             stop: ["\n"],
         });
 
-        const news_results = await getNews(searchTerm);
+        // const news_results = await getNews(searchTerm);
 
         const response_text = "Here are the news articles for:" +
-                            searchTerm +
-                            "\n\n" +
-                            news_results;
+                            searchTerm;
 
         _callback({text: response_text});
         return true;

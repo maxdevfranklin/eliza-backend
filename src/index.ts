@@ -23,7 +23,10 @@ import {
   parseArguments,
 } from "./config/index.ts";
 import { initializeDatabase } from "./database/index.ts";
-import { grandVillaDiscoveryAction } from "./actions/grand-villa.ts";
+import { grandVillaDiscoveryAction } from "./actions/grand-villa-discovery.ts";
+// import { newsAction } from "./actions/news-actions.ts";
+// import { grandvillaAction } from "./actions/grand-villa.ts";
+import { discoveryStateProvider } from "./providers/discovery-state.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,7 +64,7 @@ export function createAgent(
       nodePlugin,
       character.settings?.secrets?.WALLET_PUBLIC_KEY ? solanaPlugin : null,
     ].filter(Boolean),
-    providers: [],
+    providers: [discoveryStateProvider],
     actions: [grandVillaDiscoveryAction],
     services: [],
     managers: [],
