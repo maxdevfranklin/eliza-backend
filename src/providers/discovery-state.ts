@@ -41,8 +41,8 @@ export const discoveryStateProvider: Provider = {
             visitScheduled: false
         };
         
-        // Track all discovery stages and questions
-        for (const mem of existingState) {
+        // Process messages from oldest to newest to preserve latest stage transitions
+        for (const mem of existingState.reverse()) {
             const text = mem.content.text?.toLowerCase() || "";
             elizaLogger.info(`Processing message: ${text}`);
             
@@ -50,7 +50,7 @@ export const discoveryStateProvider: Provider = {
             const metadata = mem.content.metadata as MessageMetadata | undefined;
             if (metadata?.stage && VALID_STAGES.includes(metadata.stage)) {
                 elizaLogger.info(`Found stage transition in metadata to: ${metadata.stage}`);
-                // discoveryState.currentStage = metadata.stage;
+                discoveryState.currentStage = metadata.stage;
                 continue;
             }
             
