@@ -117,11 +117,27 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         "How is this situation impacting your family?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
+    let question = "";
     if (unansweredQuestions.length > 0) {
-        return unansweredQuestions[0];
+        // Pick a random question
+        question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
+    } else {
+        // If all have been asked, just thank and move on
+        question = "Thank you for sharing that with me.";
     }
-    
-    return "Thank you for sharing that with me. " + await moveToNextStage(_runtime, _message, "lifestyle_discovery");
+    // Store the asked question in memory
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+            text: question,
+            metadata: { askedQuestion: question }
+        }
+    });
+    // Move to next stage regardless
+    await moveToNextStage(_runtime, _message, "lifestyle_discovery");
+    return question;
 }
 
 // Lifestyle Discovery Handler  
@@ -132,11 +148,23 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         "What's something they've always enjoyed but may have stopped doing recently?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
+    let question = "";
     if (unansweredQuestions.length > 0) {
-        return unansweredQuestions[0];
+        question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
+    } else {
+        question = "Thank you for sharing that with me.";
     }
-    
-    return await moveToNextStage(_runtime, _message, "readiness_discovery");
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+            text: question,
+            metadata: { askedQuestion: question }
+        }
+    });
+    await moveToNextStage(_runtime, _message, "readiness_discovery");
+    return question;
 }
 
 // Readiness Discovery Handler
@@ -147,11 +175,23 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         "Who else is involved in helping make this decision?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
+    let question = "";
     if (unansweredQuestions.length > 0) {
-        return unansweredQuestions[0];
+        question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
+    } else {
+        question = "Thank you for sharing that with me.";
     }
-    
-    return await moveToNextStage(_runtime, _message, "priorities_discovery");
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+            text: question,
+            metadata: { askedQuestion: question }
+        }
+    });
+    await moveToNextStage(_runtime, _message, "priorities_discovery");
+    return question;
 }
 
 // Priority Discovery Handler
@@ -161,11 +201,23 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         "What kind of support do you feel would make the biggest difference for your family?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
+    let question = "";
     if (unansweredQuestions.length > 0) {
-        return unansweredQuestions[0];
+        question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
+    } else {
+        question = "Thank you for sharing that with me.";
     }
-    
-    return await moveToNextStage(_runtime, _message, "needs_matching");
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+            text: question,
+            metadata: { askedQuestion: question }
+        }
+    });
+    await moveToNextStage(_runtime, _message, "needs_matching");
+    return question;
 }
 
 // Needs Matching Handler
@@ -262,14 +314,8 @@ async function determineConversationStage(_runtime: IAgentRuntime, _message: Mem
 async function moveToNextStage(_runtime: IAgentRuntime, _message: Memory, nextStage: string): Promise<string> {
     const discoveryState = await getDiscoveryState(_runtime, _message);
     discoveryState.currentStage = nextStage;
-    
-    // Store the stage transition in memory
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: { text: `Moving to stage: ${nextStage}` }
-    });
+
+    elizaLogger.info(`Moving to stage: ${nextStage}`);
     
     return "";
 }
