@@ -117,9 +117,9 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 // Situation Discovery Handler
 async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     const unansweredQuestions = [
-        "What made you decide to call us today?",
-        "What's your greatest concern right now?", 
-        "How is this situation impacting your family?"
+        "I’m really glad you reached out — it’s a big step, and I’m here to listen. Can I ask what made you decide to call us today?",
+        "I really appreciate you taking the time to share your thoughts with me. To help me better understand what matters most to you at this moment… Could you tell me what's your greatest concern right now?", 
+        "Thanks for sharing all with me. Before we explore possible next steps, I'd like to understand a bit more about how things have been for you and your loved ones. How is this situation impacting your family?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
     let question = "";
@@ -149,9 +149,9 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
 // Lifestyle Discovery Handler  
 async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     const unansweredQuestions = [
-        "Tell me about your Mom or Dad. What does a typical day look like for them?",
-        "What are some things they love doing?",
-        "What's something they've always enjoyed but may have stopped doing recently?"
+        "Thank you for sharing so openly — I can tell how much you care. Let's talk about your Mom or Dad. What does a typical day look like for them?",
+        "Thank you, It sounds like you know your parents so well, and that’s truly wonderful. Could you tell me what are some things your parents love doing?",
+        "Thank you for helping me understand them better — I can see how much their happiness means to you. Sometimes, as life changes, our loved ones step away from things they used to love. What's something they've always enjoyed but may have stopped doing recently?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
     let question = "";
@@ -180,9 +180,8 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
 // Readiness Discovery Handler
 async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     const unansweredQuestions = [
-        "Is your Mom or Dad aware that you're looking at options?",
-        "How do they feel about the idea of moving?",
-        "Who else is involved in helping make this decision?"
+        "Ok, Looks great. I can feel that you really care your family. Can I ask you if your Mom or Dad aware that you're looking at options?",
+        "Great, I can feel that you really care your family. How do they feel about the idea of moving?",
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
     let question = "";
@@ -210,8 +209,8 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
 // Priority Discovery Handler
 async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     const unansweredQuestions = [
-        "What's most important to you in the community you choose?",
-        "What kind of support do you feel would make the biggest difference for your family?"
+        "Finding the right community can make all the difference in feeling at home and supported. We want to make sure the place you choose truly fits your family’s needs and values. What's most important to you in the community you choose?",
+        "Everyone’s needs are different, and the right kind of support can really ease the transition. We want to understand what would help your family feel comfortable and cared for every step of the way. What kind of support do you feel would make the biggest difference for your family?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
     let question = "";
