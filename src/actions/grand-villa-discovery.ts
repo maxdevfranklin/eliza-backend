@@ -117,7 +117,7 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 // Situation Discovery Handler
 async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     const unansweredQuestions = [
-        "I’m really glad you reached out — it’s a big step, and I’m here to listen. Can I ask what made you decide to call us today?",
+        "I'm really glad you reached out — it's a big step, and I'm here to listen. Can I ask what made you decide to call us today?",
         "I really appreciate you taking the time to share your thoughts with me. To help me better understand what matters most to you at this moment… Could you tell me what's your greatest concern right now?", 
         "Thanks for sharing all with me. Before we explore possible next steps, I'd like to understand a bit more about how things have been for you and your loved ones. How is this situation impacting your family?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
@@ -148,16 +148,27 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
 
 // Lifestyle Discovery Handler  
 async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
-    const unansweredQuestions = [
-        "Thank you for sharing so openly — I can tell how much you care. Let's talk about your Mom or Dad. What does a typical day look like for them?",
-        "Thank you, It sounds like you know your parents so well, and that’s truly wonderful. Could you tell me what are some things your parents love doing?",
-        "Thank you for helping me understand them better — I can see how much their happiness means to you. Sometimes, as life changes, our loved ones step away from things they used to love. What's something they've always enjoyed but may have stopped doing recently?"
-    ].filter(q => !discoveryState.questionsAsked.includes(q));
+    // Get previous user answers from situation discovery stage
+    const userAnswersFromSituationStage = await getUserAnswersFromStage(_runtime, _message, "situation_discovery");
+    
+    // Get the number of lifestyle questions already asked
+    const lifestyleQuestionsAsked = discoveryState.questionsAsked.filter((q: string) => 
+        q.includes("typical day") || q.includes("love doing") || q.includes("stopped doing")
+    ).length;
     
     let question = "";
-    if (unansweredQuestions.length > 0) {
-        question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
+    
+    if (lifestyleQuestionsAsked === 0) {
+        // First lifestyle question - personalized based on situation discovery
+        question = await generatePersonalizedLifestyleQuestion(_runtime, _message, _state, userAnswersFromSituationStage, "daily_routine");
+    } else if (lifestyleQuestionsAsked === 1) {
+        // Second lifestyle question - about activities they love
+        question = await generatePersonalizedLifestyleQuestion(_runtime, _message, _state, userAnswersFromSituationStage, "activities");
+    } else if (lifestyleQuestionsAsked === 2) {
+        // Third lifestyle question - about activities they've stopped
+        question = await generatePersonalizedLifestyleQuestion(_runtime, _message, _state, userAnswersFromSituationStage, "stopped_activities");
     } else {
+        // All lifestyle questions have been asked
         question = "Thank you for sharing that with me.";
     }
 
@@ -209,8 +220,8 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
 // Priority Discovery Handler
 async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     const unansweredQuestions = [
-        "Finding the right community can make all the difference in feeling at home and supported. We want to make sure the place you choose truly fits your family’s needs and values. What's most important to you in the community you choose?",
-        "Everyone’s needs are different, and the right kind of support can really ease the transition. We want to understand what would help your family feel comfortable and cared for every step of the way. What kind of support do you feel would make the biggest difference for your family?"
+        "Finding the right community can make all the difference in feeling at home and supported. We want to make sure the place you choose truly fits your family's needs and values. What's most important to you in the community you choose?",
+        "Everyone's needs are different, and the right kind of support can really ease the transition. We want to understand what would help your family feel comfortable and cared for every step of the way. What kind of support do you feel would make the biggest difference for your family?"
     ].filter(q => !discoveryState.questionsAsked.includes(q));
     
     let question = "";
@@ -348,6 +359,115 @@ async function moveToNextStage(_runtime: IAgentRuntime, _message: Memory, nextSt
     elizaLogger.info(`Moving to stage: ${nextStage}`);
     
     return "";
+}
+
+// Helper function to get user answers from a specific stage
+async function getUserAnswersFromStage(_runtime: IAgentRuntime, _message: Memory, stage: string): Promise<string[]> {
+    const memories = await _runtime.messageManager.getMemories({
+        roomId: _message.roomId,
+        count: 50
+    });
+    
+    const userAnswers: string[] = [];
+    const agentQuestionsFromStage: string[] = [];
+    
+    // First, collect all agent questions from the specified stage
+    for (const memory of memories) {
+        const metadata = memory.content.metadata as { stage?: string, askedQuestion?: string } | undefined;
+        
+        if (metadata?.stage === stage && memory.userId === _message.agentId && metadata.askedQuestion) {
+            agentQuestionsFromStage.push(metadata.askedQuestion);
+        }
+    }
+    
+    elizaLogger.info(`Found ${agentQuestionsFromStage.length} questions from ${stage} stage`);
+    
+    // Now find user responses that came after each of these questions
+    for (const question of agentQuestionsFromStage) {
+        let foundQuestion = false;
+        
+        for (const memory of memories) {
+            // Find the specific question
+            if (memory.userId === _message.agentId && memory.content.text === question) {
+                foundQuestion = true;
+                continue;
+            }
+            
+            // If we found the question and this is a user response, collect it
+            if (foundQuestion && memory.userId !== _message.agentId) {
+                userAnswers.push(memory.content.text);
+                foundQuestion = false; // Reset to avoid collecting multiple responses for same question
+                break; // Move to next question
+            }
+        }
+    }
+    
+    elizaLogger.info(`Collected ${userAnswers.length} user answers from ${stage} stage: ${JSON.stringify(userAnswers)}`);
+    return userAnswers;
+}
+
+// Helper function to generate personalized lifestyle questions based on previous answers
+async function generatePersonalizedLifestyleQuestion(
+    _runtime: IAgentRuntime, 
+    _message: Memory, 
+    _state: State, 
+    previousAnswers: string[], 
+    questionType: string
+): Promise<string> {
+    const combinedAnswers = previousAnswers.join(" ");
+    elizaLogger.info(`generatePersonalizedLifestyleQuestion ${combinedAnswers}`);
+    
+    let prompt = "";
+    
+    switch (questionType) {
+        case "daily_routine":
+            prompt = `Based on the user's previous responses about their family situation: "${combinedAnswers}", 
+                     generate a warm, empathetic question asking about their loved one's typical daily routine. 
+                     Reference specific concerns or details they mentioned. Keep it conversational and caring.`;
+            break;
+            
+        case "activities":
+            prompt = `Based on the user's previous responses: "${combinedAnswers}", 
+                     generate a personalized question asking about activities or hobbies their loved one enjoys. 
+                     Reference their specific situation and show understanding of their concerns.`;
+            break;
+            
+        case "stopped_activities":
+            prompt = `Based on the user's previous responses: "${combinedAnswers}", 
+                     generate a thoughtful question asking about activities their loved one used to enjoy but may have stopped doing. 
+                     Show empathy for their situation and acknowledge the challenges they've mentioned.`;
+            break;
+            
+        default:
+            return "Could you tell me more about your loved one's daily life?";
+    }
+    
+    try {
+        const response = await generateText({
+            runtime: _runtime,
+            context: prompt,
+            modelClass: ModelClass.SMALL
+        });
+        
+        return response || getDefaultQuestion(questionType);
+    } catch (error) {
+        elizaLogger.error(`Error generating personalized question: ${error}`);
+        return getDefaultQuestion(questionType);
+    }
+}
+
+// Fallback questions if generation fails
+function getDefaultQuestion(questionType: string): string {
+    switch (questionType) {
+        case "daily_routine":
+            return "Thank you for sharing so openly — I can tell how much you care. Let's talk about your loved one. What does a typical day look like for them?";
+        case "activities":
+            return "Thank you, It sounds like you know your loved one so well, and that's truly wonderful. Could you tell me what are some things they love doing?";
+        case "stopped_activities":
+            return "Thank you for helping me understand them better — I can see how much their happiness means to you. Sometimes, as life changes, our loved ones step away from things they used to love. What's something they've always enjoyed but may have stopped doing recently?";
+        default:
+            return "Could you tell me more about your loved one?";
+    }
 }
 
 async function handleGeneralInquiry(_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<string> {
