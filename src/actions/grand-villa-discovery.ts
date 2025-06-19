@@ -192,17 +192,27 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
 
 // Readiness Discovery Handler
 async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
-    const unansweredQuestions = [
-        "Ok, Looks great. I can feel that you really care your family. Can I ask you if your Mom or Dad aware that you're looking at options?",
-        "Great, I can feel that you really care your family. How do they feel about the idea of moving?",
-    ].filter(q => !discoveryState.questionsAsked.includes(q));
+    // Get previous user answer
+    const userResponse = _message.content.text;
+    
+    // Get the number of readiness questions already asked
+    const readinessQuestionsAsked = discoveryState.questionsAsked.filter((q: string) => 
+        q.includes("aware that you're looking") || q.includes("feel about the idea")
+    ).length;
     
     let question = "";
-    if (unansweredQuestions.length > 0) {
-        question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
+    
+    if (readinessQuestionsAsked === 0) {
+        // First readiness question - about awareness
+        question = await generatePersonalizedReadinessQuestion(_runtime, _message, _state, userResponse, "awareness");
+    } else if (readinessQuestionsAsked === 1) {
+        // Second readiness question - about feelings
+        question = await generatePersonalizedReadinessQuestion(_runtime, _message, _state, userResponse, "feelings");
     } else {
+        // All readiness questions have been asked
         question = "Thank you for sharing that with me.";
     }
+
     // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
@@ -221,17 +231,27 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
 
 // Priority Discovery Handler
 async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
-    const unansweredQuestions = [
-        "Finding the right community can make all the difference in feeling at home and supported. We want to make sure the place you choose truly fits your family's needs and values. What's most important to you in the community you choose?",
-        "Everyone's needs are different, and the right kind of support can really ease the transition. We want to understand what would help your family feel comfortable and cared for every step of the way. What kind of support do you feel would make the biggest difference for your family?"
-    ].filter(q => !discoveryState.questionsAsked.includes(q));
+    // Get previous user answer
+    const userResponse = _message.content.text;
+    
+    // Get the number of priority questions already asked
+    const priorityQuestionsAsked = discoveryState.questionsAsked.filter((q: string) => 
+        q.includes("most important") || q.includes("biggest difference")
+    ).length;
     
     let question = "";
-    if (unansweredQuestions.length > 0) {
-        question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
+    
+    if (priorityQuestionsAsked === 0) {
+        // First priority question - about community values
+        question = await generatePersonalizedPriorityQuestion(_runtime, _message, _state, userResponse, "community_values");
+    } else if (priorityQuestionsAsked === 1) {
+        // Second priority question - about support needs
+        question = await generatePersonalizedPriorityQuestion(_runtime, _message, _state, userResponse, "support_needs");
     } else {
+        // All priority questions have been asked
         question = "Thank you for sharing that with me.";
     }
+
     // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
@@ -480,6 +500,94 @@ async function generatePersonalizedLifestyleQuestion(
     }
 }
 
+// Helper function to generate personalized readiness questions based on previous answers
+async function generatePersonalizedReadinessQuestion(
+    _runtime: IAgentRuntime, 
+    _message: Memory, 
+    _state: State, 
+    previousAnswers: string, 
+    questionType: string
+): Promise<string> {
+    const combinedAnswers = previousAnswers;
+    elizaLogger.info(`generatePersonalizedReadinessQuestion ${combinedAnswers}`);
+    
+    let prompt = "";
+    
+    switch (questionType) {
+        case "awareness":
+            prompt = `Based on the user's previous responses about their family situation: "${combinedAnswers}", 
+                     generate a warm, empathetic question asking if their loved one is aware that they're looking at living options. 
+                     Reference specific details they mentioned and show understanding. Keep it conversational and caring.`;
+            break;
+            
+        case "feelings":
+            prompt = `Based on the user's previous responses: "${combinedAnswers}", 
+                     generate a personalized question asking about how their loved one feels about the idea of moving to a senior community. 
+                     Reference their specific situation and show empathy for their concerns.`;
+            break;
+            
+        default:
+            return "How does your loved one feel about exploring senior living options?";
+    }
+    
+    try {
+        const response = await generateText({
+            runtime: _runtime,
+            context: prompt,
+            modelClass: ModelClass.SMALL
+        });
+        
+        return response || getDefaultReadinessQuestion(questionType);
+    } catch (error) {
+        elizaLogger.error(`Error generating personalized readiness question: ${error}`);
+        return getDefaultReadinessQuestion(questionType);
+    }
+}
+
+// Helper function to generate personalized priority questions based on previous answers
+async function generatePersonalizedPriorityQuestion(
+    _runtime: IAgentRuntime, 
+    _message: Memory, 
+    _state: State, 
+    previousAnswers: string, 
+    questionType: string
+): Promise<string> {
+    const combinedAnswers = previousAnswers;
+    elizaLogger.info(`generatePersonalizedPriorityQuestion ${combinedAnswers}`);
+    
+    let prompt = "";
+    
+    switch (questionType) {
+        case "community_values":
+            prompt = `Based on the user's previous responses about their family situation: "${combinedAnswers}", 
+                     generate a warm, empathetic question asking what's most important to them in choosing a senior living community. 
+                     Reference specific concerns or details they mentioned. Keep it conversational and caring.`;
+            break;
+            
+        case "support_needs":
+            prompt = `Based on the user's previous responses: "${combinedAnswers}", 
+                     generate a personalized question asking about what kind of support would make the biggest difference for their family. 
+                     Reference their specific situation and show understanding of their needs.`;
+            break;
+            
+        default:
+            return "What's most important to you in choosing the right community for your loved one?";
+    }
+    
+    try {
+        const response = await generateText({
+            runtime: _runtime,
+            context: prompt,
+            modelClass: ModelClass.SMALL
+        });
+        
+        return response || getDefaultPriorityQuestion(questionType);
+    } catch (error) {
+        elizaLogger.error(`Error generating personalized priority question: ${error}`);
+        return getDefaultPriorityQuestion(questionType);
+    }
+}
+
 // Fallback questions if generation fails
 function getDefaultQuestion(questionType: string): string {
     switch (questionType) {
@@ -491,6 +599,30 @@ function getDefaultQuestion(questionType: string): string {
             return "Thank you for helping me understand them better — I can see how much their happiness means to you. Sometimes, as life changes, our loved ones step away from things they used to love. What's something they've always enjoyed but may have stopped doing recently?";
         default:
             return "Could you tell me more about your loved one?";
+    }
+}
+
+// Fallback readiness questions if generation fails
+function getDefaultReadinessQuestion(questionType: string): string {
+    switch (questionType) {
+        case "awareness":
+            return "Ok, Looks great. I can feel that you really care your family. Can I ask you if your Mom or Dad aware that you're looking at options?";
+        case "feelings":
+            return "Great, I can feel that you really care your family. How do they feel about the idea of moving?";
+        default:
+            return "How does your loved one feel about exploring senior living options?";
+    }
+}
+
+// Fallback priority questions if generation fails
+function getDefaultPriorityQuestion(questionType: string): string {
+    switch (questionType) {
+        case "community_values":
+            return "Finding the right community can make all the difference in feeling at home and supported. We want to make sure the place you choose truly fits your family's needs and values. What's most important to you in the community you choose?";
+        case "support_needs":
+            return "Everyone's needs are different, and the right kind of support can really ease the transition. We want to understand what would help your family feel comfortable and cared for every step of the way. What kind of support do you feel would make the biggest difference for your family?";
+        default:
+            return "What's most important to you in choosing the right community for your loved one?";
     }
 }
 
