@@ -116,20 +116,21 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 
 // Situation Discovery Handler
 async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
-    const unansweredQuestions = [
-        "I'm really glad you reached out — it's a big step, and I'm here to listen. Can I ask what made you decide to call us today?",
-        "I really appreciate you taking the time to share your thoughts with me. To help me better understand what matters most to you at this moment… Could you tell me what's your greatest concern right now?", 
-        "Thanks for sharing all with me. Before we explore possible next steps, I'd like to understand a bit more about how things have been for you and your loved ones. How is this situation impacting your family?"
-    ].filter(q => !discoveryState.questionsAsked.includes(q));
+    // const unansweredQuestions = [
+    //     "I'm really glad you reached out — it's a big step, and I'm here to listen. Can I ask what made you decide to call us today?",
+    //     "I really appreciate you taking the time to share your thoughts with me. To help me better understand what matters most to you at this moment… Could you tell me what's your greatest concern right now?", 
+    //     "Thanks for sharing all with me. Before we explore possible next steps, I'd like to understand a bit more about how things have been for you and your loved ones. How is this situation impacting your family?"
+    // ].filter(q => !discoveryState.questionsAsked.includes(q));
     
-    let question = "";
-    if (unansweredQuestions.length > 0) {
-        // Pick a random question
-        question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
-    } else {
-        // If all have been asked, just thank and move on
-        question = "Thank you for sharing that with me.";
-    }
+    // let question = "";
+    // if (unansweredQuestions.length > 0) {
+    //     // Pick a random question
+    //     question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
+    // } else {
+    //     // If all have been asked, just thank and move on
+    //     question = "Thank you for sharing that with me.";
+    // }
+    const question = "Thanks for sharing all with me. Before we explore possible next steps, I'd like to understand a bit more about how things have been for you and your loved ones. Could you tell me what made you decide to call us today?";
     // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
@@ -138,7 +139,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         content: {
             text: question,
             metadata: { 
-                askedQuestion: question,
+                // askedQuestion: question,
                 stage: "lifestyle_discovery"  // Set the next stage in metadata
             }
         }
@@ -149,7 +150,8 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
 // Lifestyle Discovery Handler  
 async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     // Get previous user answers from situation discovery stage
-    const userAnswersFromSituationStage = await getUserAnswersFromStage(_runtime, _message, "situation_discovery");
+    // const userAnswersFromSituationStage = await getUserAnswersFromStage(_runtime, _message, "lifestyle_discovery");
+    const userAnswersFromSituationStage = _message.content.text;
     
     // Get the number of lifestyle questions already asked
     const lifestyleQuestionsAsked = discoveryState.questionsAsked.filter((q: string) => 
@@ -369,37 +371,59 @@ async function getUserAnswersFromStage(_runtime: IAgentRuntime, _message: Memory
     });
     
     const userAnswers: string[] = [];
-    const agentQuestionsFromStage: string[] = [];
+    let stageStartIndex = -1;
+    let stageEndIndex = -1;
     
-    // First, collect all agent questions from the specified stage
-    for (const memory of memories) {
-        const metadata = memory.content.metadata as { stage?: string, askedQuestion?: string } | undefined;
+    // Sort memories by creation time (oldest first) to process conversation chronologically
+    const sortedMemories = memories.sort((a, b) => 
+        new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+    );
+    
+    elizaLogger.info(`Looking for user answers in ${stage} stage from ${sortedMemories.length} memories`);
+    elizaLogger.info(`Agent ID: ${_message.agentId}`);
+    
+    // Log all memories for debugging
+    sortedMemories.forEach((memory, index) => {
+        const metadata = memory.content.metadata as { stage?: string } | undefined;
+        elizaLogger.info(`Memory ${index}: userId=${memory.userId}, agentId=${_message.agentId}, isAgent=${memory.userId === _message.agentId}, text="${memory.content.text}", metadata=${JSON.stringify(metadata)}, createdAt=${memory.createdAt}`);
+    });
+    
+    // Find the start and end of the target stage
+    for (let i = 0; i < sortedMemories.length; i++) {
+        const memory = sortedMemories[i];
+        const metadata = memory.content.metadata as { stage?: string } | undefined;
         
-        if (metadata?.stage === stage && memory.userId === _message.agentId && metadata.askedQuestion) {
-            agentQuestionsFromStage.push(metadata.askedQuestion);
+        // Find when we enter the target stage
+        if (metadata?.stage === stage && memory.userId === _message.agentId && stageStartIndex === -1) {
+            stageStartIndex = i;
+            elizaLogger.info(`Found start of ${stage} stage at index ${i}: ${memory.content.text}`);
+        }
+        
+        // Find when we exit the target stage (next agent message with different stage)
+        if (stageStartIndex !== -1 && metadata?.stage && metadata.stage !== stage && memory.userId === _message.agentId) {
+            stageEndIndex = i;
+            elizaLogger.info(`Found end of ${stage} stage at index ${i}: ${memory.content.text}`);
+            break;
         }
     }
     
-    elizaLogger.info(`Found ${agentQuestionsFromStage.length} questions from ${stage} stage`);
+    // If we found the stage start but no end, collect until the end of memories
+    if (stageStartIndex !== -1 && stageEndIndex === -1) {
+        stageEndIndex = sortedMemories.length;
+        elizaLogger.info(`Stage ${stage} continues to end of conversation`);
+    }
     
-    // Now find user responses that came after each of these questions
-    for (const question of agentQuestionsFromStage) {
-        let foundQuestion = false;
-        
-        for (const memory of memories) {
-            // Find the specific question
-            if (memory.userId === _message.agentId && memory.content.text === question) {
-                foundQuestion = true;
-                continue;
-            }
-            
-            // If we found the question and this is a user response, collect it
-            if (foundQuestion && memory.userId !== _message.agentId) {
+    // Collect user messages within the stage boundaries
+    if (stageStartIndex !== -1) {
+        for (let i = stageStartIndex + 1; i < stageEndIndex; i++) {
+            const memory = sortedMemories[i];
+            if (memory.userId !== _message.agentId) {
                 userAnswers.push(memory.content.text);
-                foundQuestion = false; // Reset to avoid collecting multiple responses for same question
-                break; // Move to next question
+                elizaLogger.info(`Collected user answer in ${stage}: ${memory.content.text}`);
             }
         }
+    } else {
+        elizaLogger.info(`No messages found for stage: ${stage}`);
     }
     
     elizaLogger.info(`Collected ${userAnswers.length} user answers from ${stage} stage: ${JSON.stringify(userAnswers)}`);
@@ -411,10 +435,10 @@ async function generatePersonalizedLifestyleQuestion(
     _runtime: IAgentRuntime, 
     _message: Memory, 
     _state: State, 
-    previousAnswers: string[], 
+    previousAnswers: string, 
     questionType: string
 ): Promise<string> {
-    const combinedAnswers = previousAnswers.join(" ");
+    const combinedAnswers = previousAnswers;
     elizaLogger.info(`generatePersonalizedLifestyleQuestion ${combinedAnswers}`);
     
     let prompt = "";
