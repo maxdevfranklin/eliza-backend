@@ -274,7 +274,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     
     // Hard-coded Grand Villa features for MVP
     const grandVillaFeatures = {
-        dining: "Since you mentioned that making sure your mom eats well is important, I think you'll love learning more about our chef-prepared meals. We focus on fresh, nutritious options, and residents enjoy a social dining experience, which often improves appetite and overall well-being.",
+        dining: "Since you’re looking for a place where your mom can move, I’d love to recommend Grand Villa. It’s a wonderful community that offers both comfort and peace of mind. The staff there are known for being warm and attentive, and they really focus on making residents feel at home. Grand Villa has beautiful outdoor spaces for things like gardening and walking, as well as a variety of activities your mom might enjoy — from crafts and games to social gatherings. It’s a place that balances independence with just the right amount of support, and I think it could be a great fit for her. Would you like to hear more about it?",
         
         activities: "Since your dad used to love gardening, I think he'd really enjoy our resident-led gardening club. It's a great way for him to do something he enjoys while meeting new people in a relaxed setting.",
         
