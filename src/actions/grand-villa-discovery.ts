@@ -1,5 +1,5 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
-import { discoveryStateProvider } from "../providers/discovery-state.js";
+import { discoveryStateProvider, saveUserResponse, getUserResponses } from "../providers/discovery-state.js";
 
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
@@ -32,15 +32,19 @@ export const grandVillaDiscoveryAction: Action = {
         _options: { [key: string]: unknown },
         _callback: HandlerCallback
     ) => {
-        elizaLogger.info("Starting Grand Villa Discovery process");
+        elizaLogger.info("🚀 Starting Grand Villa Discovery process");
         
         // Get current discovery state
         const discoveryState = await getDiscoveryState(_runtime, _message);
-        elizaLogger.info(`Current discovery state in handler: ${JSON.stringify(discoveryState)}`);
+        elizaLogger.info(`📊 Current discovery state in handler: ${JSON.stringify(discoveryState)}`);
+        
+        // Show current user responses collected so far
+        const currentResponses = await getUserResponses(_runtime, _message);
+        elizaLogger.info(`💾 User responses collected so far: ${JSON.stringify(currentResponses, null, 2)}`);
         
         // Determine conversation stage and next action
         const conversationStage = await determineConversationStage(_runtime, _message, discoveryState);
-        elizaLogger.info(`Determined conversation stage: ${conversationStage}`);
+        elizaLogger.info(`🎯 Determined conversation stage: ${conversationStage}`);
         
         let response_text = "";
         
@@ -118,15 +122,15 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
-        if (!discoveryState.userResponses) {
-            discoveryState.userResponses = {};
-        }
-        if (!discoveryState.userResponses.situation) {
-            discoveryState.userResponses.situation = [];
-        }
-        discoveryState.userResponses.situation.push(_message.content.text);
-        elizaLogger.info(`Saved situation response: ${_message.content.text}`);
+        await saveUserResponse(_runtime, _message, "situation", _message.content.text);
     }
+    
+    // Show previous user responses collected so far
+    const previousResponses = await getUserResponses(_runtime, _message);
+    elizaLogger.info(`=== SITUATION DISCOVERY STAGE ===`);
+    elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
+    elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`================================`)
     
     // const unansweredQuestions = [
     //     "I'm really glad you reached out — it's a big step, and I'm here to listen. Can I ask what made you decide to call us today?",
@@ -163,15 +167,15 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
 async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
-        if (!discoveryState.userResponses) {
-            discoveryState.userResponses = {};
-        }
-        if (!discoveryState.userResponses.lifestyle) {
-            discoveryState.userResponses.lifestyle = [];
-        }
-        discoveryState.userResponses.lifestyle.push(_message.content.text);
-        elizaLogger.info(`Saved lifestyle response: ${_message.content.text}`);
+        await saveUserResponse(_runtime, _message, "lifestyle", _message.content.text);
     }
+    
+    // Show previous user responses collected so far
+    const previousResponses = await getUserResponses(_runtime, _message);
+    elizaLogger.info(`=== LIFESTYLE DISCOVERY STAGE ===`);
+    elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
+    elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`=================================`)
     
     // Get previous user answers from situation discovery stage
     // const userAnswersFromSituationStage = await getUserAnswersFromStage(_runtime, _message, "lifestyle_discovery");
@@ -218,15 +222,15 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
 async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
-        if (!discoveryState.userResponses) {
-            discoveryState.userResponses = {};
-        }
-        if (!discoveryState.userResponses.readiness) {
-            discoveryState.userResponses.readiness = [];
-        }
-        discoveryState.userResponses.readiness.push(_message.content.text);
-        elizaLogger.info(`Saved readiness response: ${_message.content.text}`);
+        await saveUserResponse(_runtime, _message, "readiness", _message.content.text);
     }
+    
+    // Show previous user responses collected so far
+    const previousResponses = await getUserResponses(_runtime, _message);
+    elizaLogger.info(`=== READINESS DISCOVERY STAGE ===`);
+    elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
+    elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`=================================`)
     
     // Get previous user answer
     const userResponse = _message.content.text;
@@ -269,15 +273,15 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
 async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
-        if (!discoveryState.userResponses) {
-            discoveryState.userResponses = {};
-        }
-        if (!discoveryState.userResponses.priorities) {
-            discoveryState.userResponses.priorities = [];
-        }
-        discoveryState.userResponses.priorities.push(_message.content.text);
-        elizaLogger.info(`Saved priorities response: ${_message.content.text}`);
+        await saveUserResponse(_runtime, _message, "priorities", _message.content.text);
     }
+    
+    // Show previous user responses collected so far
+    const previousResponses = await getUserResponses(_runtime, _message);
+    elizaLogger.info(`=== PRIORITY DISCOVERY STAGE ===`);
+    elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
+    elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`================================`)
     
     // Get previous user answer
     const userResponse = _message.content.text;
@@ -320,24 +324,25 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
 async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     // Save the final user response if this is a user message
     if (_message.content.text && _message.userId !== _message.agentId) {
-        if (!discoveryState.userResponses) {
-            discoveryState.userResponses = {};
-        }
-        if (!discoveryState.userResponses.priorities) {
-            discoveryState.userResponses.priorities = [];
-        }
-        discoveryState.userResponses.priorities.push(_message.content.text);
-        elizaLogger.info(`Saved final priorities response: ${_message.content.text}`);
+        await saveUserResponse(_runtime, _message, "priorities", _message.content.text);
     }
     
     // Get all user responses from previous stages
-    const userResponses = discoveryState.userResponses || {};
+    const userResponses = await getUserResponses(_runtime, _message);
     const situationResponses = userResponses.situation || [];
     const lifestyleResponses = userResponses.lifestyle || [];
     const readinessResponses = userResponses.readiness || [];
     const prioritiesResponses = userResponses.priorities || [];
     
-    elizaLogger.info(`All user responses - Situation: ${JSON.stringify(situationResponses)}, Lifestyle: ${JSON.stringify(lifestyleResponses)}, Readiness: ${JSON.stringify(readinessResponses)}, Priorities: ${JSON.stringify(prioritiesResponses)}`);
+    // Show comprehensive summary of all collected responses
+    elizaLogger.info(`=== NEEDS MATCHING STAGE ===`);
+    elizaLogger.info(`📋 COMPREHENSIVE USER RESPONSE SUMMARY:`);
+    elizaLogger.info(`  🏠 Situation Responses (${situationResponses.length}): ${JSON.stringify(situationResponses, null, 2)}`);
+    elizaLogger.info(`  🎯 Lifestyle Responses (${lifestyleResponses.length}): ${JSON.stringify(lifestyleResponses, null, 2)}`);
+    elizaLogger.info(`  💭 Readiness Responses (${readinessResponses.length}): ${JSON.stringify(readinessResponses, null, 2)}`);
+    elizaLogger.info(`  ⭐ Priority Responses (${prioritiesResponses.length}): ${JSON.stringify(prioritiesResponses, null, 2)}`);
+    elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`===============================`);
     
     // Combine all responses for analysis
     const allUserResponses = [
