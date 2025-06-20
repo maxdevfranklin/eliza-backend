@@ -116,6 +116,18 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 
 // Situation Discovery Handler
 async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    // Save user response from this stage
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        if (!discoveryState.userResponses) {
+            discoveryState.userResponses = {};
+        }
+        if (!discoveryState.userResponses.situation) {
+            discoveryState.userResponses.situation = [];
+        }
+        discoveryState.userResponses.situation.push(_message.content.text);
+        elizaLogger.info(`Saved situation response: ${_message.content.text}`);
+    }
+    
     // const unansweredQuestions = [
     //     "I'm really glad you reached out — it's a big step, and I'm here to listen. Can I ask what made you decide to call us today?",
     //     "I really appreciate you taking the time to share your thoughts with me. To help me better understand what matters most to you at this moment… Could you tell me what's your greatest concern right now?", 
@@ -149,6 +161,18 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
 
 // Lifestyle Discovery Handler  
 async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    // Save user response from this stage
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        if (!discoveryState.userResponses) {
+            discoveryState.userResponses = {};
+        }
+        if (!discoveryState.userResponses.lifestyle) {
+            discoveryState.userResponses.lifestyle = [];
+        }
+        discoveryState.userResponses.lifestyle.push(_message.content.text);
+        elizaLogger.info(`Saved lifestyle response: ${_message.content.text}`);
+    }
+    
     // Get previous user answers from situation discovery stage
     // const userAnswersFromSituationStage = await getUserAnswersFromStage(_runtime, _message, "lifestyle_discovery");
     const userAnswersFromSituationStage = _message.content.text;
@@ -192,6 +216,18 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
 
 // Readiness Discovery Handler
 async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    // Save user response from this stage
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        if (!discoveryState.userResponses) {
+            discoveryState.userResponses = {};
+        }
+        if (!discoveryState.userResponses.readiness) {
+            discoveryState.userResponses.readiness = [];
+        }
+        discoveryState.userResponses.readiness.push(_message.content.text);
+        elizaLogger.info(`Saved readiness response: ${_message.content.text}`);
+    }
+    
     // Get previous user answer
     const userResponse = _message.content.text;
     
@@ -231,6 +267,18 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
 
 // Priority Discovery Handler
 async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    // Save user response from this stage
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        if (!discoveryState.userResponses) {
+            discoveryState.userResponses = {};
+        }
+        if (!discoveryState.userResponses.priorities) {
+            discoveryState.userResponses.priorities = [];
+        }
+        discoveryState.userResponses.priorities.push(_message.content.text);
+        elizaLogger.info(`Saved priorities response: ${_message.content.text}`);
+    }
+    
     // Get previous user answer
     const userResponse = _message.content.text;
     
@@ -270,43 +318,70 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
 
 // Needs Matching Handler
 async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
-    const identifiedNeeds = discoveryState.identifiedNeeds || [];
+    // Save the final user response if this is a user message
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        if (!discoveryState.userResponses) {
+            discoveryState.userResponses = {};
+        }
+        if (!discoveryState.userResponses.priorities) {
+            discoveryState.userResponses.priorities = [];
+        }
+        discoveryState.userResponses.priorities.push(_message.content.text);
+        elizaLogger.info(`Saved final priorities response: ${_message.content.text}`);
+    }
     
-    // Hard-coded Grand Villa features for MVP
-    const grandVillaFeatures = {
-        dining: "Since you’re looking for a place where your mom can move, I’d love to recommend Grand Villa. It’s a wonderful community that offers both comfort and peace of mind. The staff there are known for being warm and attentive, and they really focus on making residents feel at home. Grand Villa has beautiful outdoor spaces for things like gardening and walking, as well as a variety of activities your mom might enjoy — from crafts and games to social gatherings. It’s a place that balances independence with just the right amount of support, and I think it could be a great fit for her. Would you like to hear more about it?",
+    // Get all user responses from previous stages
+    const userResponses = discoveryState.userResponses || {};
+    const situationResponses = userResponses.situation || [];
+    const lifestyleResponses = userResponses.lifestyle || [];
+    const readinessResponses = userResponses.readiness || [];
+    const prioritiesResponses = userResponses.priorities || [];
+    
+    elizaLogger.info(`All user responses - Situation: ${JSON.stringify(situationResponses)}, Lifestyle: ${JSON.stringify(lifestyleResponses)}, Readiness: ${JSON.stringify(readinessResponses)}, Priorities: ${JSON.stringify(prioritiesResponses)}`);
+    
+    // Combine all responses for analysis
+    const allUserResponses = [
+        ...situationResponses,
+        ...lifestyleResponses,
+        ...readinessResponses,
+        ...prioritiesResponses
+    ].join(" ");
+    
+    // Generate personalized needs matching response based on all user responses
+    try {
+        const prompt = `Based on all the user's responses about their family's situation and needs: "${allUserResponses}", 
+                       generate a warm, personalized response that:
+                       1. Acknowledges specific details they mentioned about their loved one
+                       2. Recommends Grand Villa as a senior living community
+                       3. Matches specific Grand Villa features to their mentioned needs and concerns
+                       4. Shows empathy and understanding of their situation
+                       5. Explains how Grand Villa can address their specific lifestyle, readiness, and priority concerns
+                       6. Ends with suggesting a visit to experience the community firsthand
+                       
+                       Keep the tone conversational, caring, and professional. Reference specific details from their responses.`;
         
-        activities: "Since your dad used to love gardening, I think he'd really enjoy our resident-led gardening club. It's a great way for him to do something he enjoys while meeting new people in a relaxed setting.",
+        const personalizedResponse = await generateText({
+            runtime: _runtime,
+            context: prompt,
+            modelClass: ModelClass.SMALL
+        });
         
-        safety: "Since your mom has had a few falls recently, I want to highlight the extra safety measures in place here—like our emergency response system and 24/7 trained staff. That way, she has independence but also support when needed.",
-        
-        social: "I can see that staying socially connected is important. Our community really focuses on building friendships through shared meals, group activities, and common spaces where residents naturally gather.",
-        
-        independence: "It sounds like maintaining independence is crucial. Grand Villa is designed to support that—residents have their own apartments but can access help when they need it."
-    };
-    
-    // Match needs to features (simplified for MVP)
-    let matchedFeatures = [];
-    
-    if (identifiedNeeds.includes("nutrition") || identifiedNeeds.includes("eating") || identifiedNeeds.includes("meals")) {
-        matchedFeatures.push(grandVillaFeatures.dining);
-    }
-    if (identifiedNeeds.includes("activities") || identifiedNeeds.includes("hobbies") || identifiedNeeds.includes("gardening")) {
-        matchedFeatures.push(grandVillaFeatures.activities);
-    }
-    if (identifiedNeeds.includes("safety") || identifiedNeeds.includes("falls") || identifiedNeeds.includes("emergency")) {
-        matchedFeatures.push(grandVillaFeatures.safety);
-    }
-    if (identifiedNeeds.includes("social") || identifiedNeeds.includes("lonely") || identifiedNeeds.includes("friends")) {
-        matchedFeatures.push(grandVillaFeatures.social);
+        if (personalizedResponse) {
+            elizaLogger.info(`Generated personalized needs matching response: ${personalizedResponse}`);
+            return personalizedResponse;
+        }
+    } catch (error) {
+        elizaLogger.error(`Error generating personalized needs matching response: ${error}`);
     }
     
-    if (matchedFeatures.length === 0) {
-        matchedFeatures.push(grandVillaFeatures.independence); // Default
-    }
+    // Fallback to default response if generation fails
+    const fallbackResponse = `Based on everything you've shared with me, I can see how much you care about finding the right place for your loved one. Grand Villa is a wonderful community that offers both comfort and peace of mind. The staff there are known for being warm and attentive, and they really focus on making residents feel at home. 
+
+Grand Villa has beautiful outdoor spaces and a variety of activities that residents enjoy — from crafts and games to social gatherings. It's a place that balances independence with just the right amount of support.
+
+I think Grand Villa could be a great fit for your family. Would you like to schedule a visit so you can experience the community firsthand and see what daily life would feel like?`;
     
-    const response = matchedFeatures.join("\n\n") + "\n\n" + await moveToNextStage(_runtime, _message, "visit_transition");
-    return response;
+    return fallbackResponse;
 }
 
 // Visit Transition Handler

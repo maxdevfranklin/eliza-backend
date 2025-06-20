@@ -118,3 +118,50 @@ export const discoveryStateProvider: Provider = {
         return discoveryState;
     }
 };
+
+// Utility functions for user response persistence
+export async function saveUserResponse(runtime: IAgentRuntime, message: Memory, stage: string, userResponse: string) {
+    elizaLogger.info(`Saving user response for stage ${stage}: ${userResponse}`);
+    
+    await runtime.messageManager.createMemory({
+        roomId: message.roomId,
+        userId: message.userId,
+        agentId: message.agentId,
+        content: {
+            text: `[Discovery Response] ${userResponse}`,
+            metadata: {
+                discoveryStage: stage,
+                userResponse: userResponse,
+                timestamp: new Date().toISOString()
+            }
+        }
+    });
+}
+
+export async function getUserResponses(runtime: IAgentRuntime, message: Memory) {
+    const memories = await runtime.messageManager.getMemories({
+        roomId: message.roomId,
+        count: 100,
+        unique: false
+    });
+    
+    const userResponses: { [key: string]: string[] } = {
+        situation: [],
+        lifestyle: [],
+        readiness: [],
+        priorities: []
+    };
+    
+    for (const mem of memories) {
+        const metadata = mem.content.metadata as any;
+        if (metadata?.discoveryStage && metadata?.userResponse) {
+            const stage = metadata.discoveryStage;
+            if (userResponses[stage]) {
+                userResponses[stage].push(metadata.userResponse);
+            }
+        }
+    }
+    
+    elizaLogger.info(`Retrieved user responses: ${JSON.stringify(userResponses)}`);
+    return userResponses;
+}
