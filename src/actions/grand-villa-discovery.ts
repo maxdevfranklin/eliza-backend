@@ -84,7 +84,6 @@ export const grandVillaDiscoveryAction: Action = {
         }
         
         // Update discovery state
-        // await updateDiscoveryState(_runtime, _message, conversationStage, response_text);
         
         _callback({ 
           text: response_text,
