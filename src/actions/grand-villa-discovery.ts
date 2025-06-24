@@ -19,10 +19,15 @@ export const grandVillaDiscoveryAction: Action = {
     ],
     
     validate: async (_runtime: IAgentRuntime, _message: Memory) => {
-        const discoveryState = await getDiscoveryState(_runtime, _message);
-        elizaLogger.info(`Discovery state: ${JSON.stringify(discoveryState)}`);
-        elizaLogger.info("Action is triggered");
-        return true;
+        try {
+            const discoveryState = await getDiscoveryState(_runtime, _message);
+            elizaLogger.info(`Discovery state: ${JSON.stringify(discoveryState)}`);
+            elizaLogger.info("✅ Grand Villa action triggered successfully");
+            return true; // Always trigger for 100% reliability
+        } catch (error) {
+            elizaLogger.warn("Discovery state error, but still triggering action:", error);
+            return true; // Guarantee triggering even if state fails
+        }
     },
     
     handler: async (
@@ -33,6 +38,8 @@ export const grandVillaDiscoveryAction: Action = {
         _callback: HandlerCallback
     ) => {
         elizaLogger.info("🚀 Starting Grand Villa Discovery process");
+        
+        try {
         
         // Get current discovery state
         const discoveryState = await getDiscoveryState(_runtime, _message);
@@ -83,15 +90,37 @@ export const grandVillaDiscoveryAction: Action = {
                 response_text = await handleGeneralInquiry(_runtime, _message, _state);
         }
         
-        // Update discovery state
+        // Ensure we always have a response
+        if (!response_text || response_text.trim() === "") {
+            response_text = "I'd be happy to help you learn more about Grand Villa and senior living options. What brings you here today?";
+            elizaLogger.warn("⚠️ Empty response detected, using fallback");
+        }
         
         _callback({ 
           text: response_text,
           metadata: {
-            stage: conversationStage
+            stage: conversationStage,
+            actionName: "grand-villa-discovery",
+            reliability: "enhanced"
           }
         });
         return true;
+        
+        } catch (error) {
+            elizaLogger.error("❌ Error in Grand Villa Discovery action:", error);
+            
+            // Ultimate fallback response
+            _callback({
+                text: "Thank you for your interest in senior living options. I'm here to help you find the right solution for your family. How can I assist you today?",
+                metadata: {
+                    actionName: "grand-villa-discovery",
+                    fallback: true,
+                    error: error.message
+                }
+            });
+            
+            return true; // Always return true to maintain reliability
+        }
     }
 }
 

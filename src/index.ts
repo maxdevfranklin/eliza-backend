@@ -23,8 +23,8 @@ import {
   parseArguments,
 } from "./config/index.ts";
 import { initializeDatabase } from "./database/index.ts";
-import { grandVillaDiscoveryAction } from "./actions/grand-villa-discovery.ts";
-import { dialogFlowAction } from "./actions/dialog-flow.ts";
+import { reliableGrandVillaDiscoveryAction } from "./actions/grand-villa-discovery-reliable.ts";
+import { universalFallbackAction } from "./actions/reliable-action-templates.ts";
 // import { newsAction } from "./actions/news-actions.ts";
 // import { grandvillaAction } from "./actions/grand-villa.ts";
 import { discoveryStateProvider } from "./providers/discovery-state.ts";
@@ -66,7 +66,7 @@ export function createAgent(
       character.settings?.secrets?.WALLET_PUBLIC_KEY ? solanaPlugin : null,
     ].filter(Boolean),
     providers: [discoveryStateProvider],
-    actions: [grandVillaDiscoveryAction, dialogFlowAction],
+    actions: [reliableGrandVillaDiscoveryAction, universalFallbackAction],
     services: [],
     managers: [],
     cacheManager: cache,
