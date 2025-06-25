@@ -3,17 +3,77 @@ import { discoveryStateProvider, saveUserResponse, getUserResponses } from "../p
 
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
-    description: "Guide families through the Sherpa discovery process for Grand Villa",
-    similes: ["GRAND_VILLA", "SENIOR_LIVING", "DISCOVERY", "QUESTIONS", "LEARN_ABOUT"],
+    description: "Respond to any user message and guide families through conversations about senior living and Grand Villa discovery process",
+    similes: [
+        "HELLO", "HI", "HEY", "GREETINGS", "GOOD", "MORNING", "AFTERNOON", "EVENING", "NIGHT",
+        "START", "BEGIN", "FIRST", "INITIAL", "OPENING", "WELCOME", "CHAT", "TALK", "SPEAK",
+        "THE", "A", "AN", "I", "YOU", "WE", "THEY", "IT", "IS", "ARE", "AM", "WAS", "WERE",
+        "HAVE", "HAS", "HAD", "DO", "DOES", "DID", "WILL", "WOULD", "COULD", "SHOULD", "CAN",
+        "GRAND_VILLA", "SENIOR_LIVING", "DISCOVERY", "QUESTIONS", "LEARN_ABOUT", "INFORMATION",
+        "HELP", "LOOKING", "NEED", "FAMILY", "CARE", "OPTIONS", "COMMUNITY", "RESIDENCE", 
+        "ASSISTANCE", "SUPPORT", "HOME", "LIVING", "ELDER", "PARENT", "MOM", "DAD", "MOTHER", 
+        "FATHER", "GRANDMOTHER", "GRANDFATHER", "AGING", "RETIREMENT", "HEALTH", "SAFETY",
+        "SERVICES", "FACILITIES", "AMENITIES", "STAFF", "VISIT", "TOUR", "COSTS", "PRICING",
+        "THANKS", "THANK", "YES", "NO", "OKAY", "OK", "SURE", "MAYBE", "PERHAPS", "POSSIBLY",
+        "INTERESTED", "CURIOUS", "WONDERING", "ASK", "TELL", "EXPLAIN", "DESCRIBE", "SHOW",
+        "WHAT", "WHO", "WHERE", "WHEN", "HOW", "WHY", "WHICH", "WHOSE", "WHOM",
+        "PLEASE", "SORRY", "EXCUSE", "UNDERSTAND", "KNOW", "THINK", "FEEL", "BELIEVE", 
+        "HOPE", "WANT", "WISH", "LOVE", "LIKE", "PREFER", "CHOOSE", "SELECT",
+        "BEST", "BETTER", "GREAT", "EXCELLENT", "PERFECT", "RIGHT", "CORRECT", "WRONG",
+        "NEW", "OLD", "YOUNG", "BIG", "SMALL", "NICE", "BEAUTIFUL", "COMFORTABLE",
+        "AND", "OR", "BUT", "SO", "BECAUSE", "IF", "WHEN", "WHILE", "SINCE", "UNTIL",
+        "MY", "YOUR", "HIS", "HER", "ITS", "OUR", "THEIR", "THIS", "THAT", "THESE", "THOSE",
+        "HERE", "THERE", "NOW", "THEN", "TODAY", "TOMORROW", "YESTERDAY", "SOON", "LATER"
+    ],
     examples: [
         [
             {
                 user: "{{user1}}",
-                content: { text: "I'm looking for information about Grand Villa" }
+                content: { text: "Hello" }
             },
             {
                 user: "{{user2}}", 
-                content: { text: "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible." }
+                content: { text: "Hello! I'm here to help you with any questions about senior living options. What brings you here today?" }
+            }
+        ],
+        [
+            {
+                user: "{{user1}}",
+                content: { text: "Hi there" }
+            },
+            {
+                user: "{{user2}}", 
+                content: { text: "Hi! I'd be happy to help you learn more about senior living communities. How can I assist you today?" }
+            }
+        ],
+        [
+            {
+                user: "{{user1}}",
+                content: { text: "Good morning" }
+            },
+            {
+                user: "{{user2}}", 
+                content: { text: "Good morning! I'm here to help families find the right senior living solutions. What can I help you with?" }
+            }
+        ],
+        [
+            {
+                user: "{{user1}}",
+                content: { text: "I need help" }
+            },
+            {
+                user: "{{user2}}", 
+                content: { text: "I'd be happy to help you! Before we get started, do you mind if I ask a few questions to better understand what you're looking for?" }
+            }
+        ],
+        [
+            {
+                user: "{{user1}}",
+                content: { text: "Looking for information" }
+            },
+            {
+                user: "{{user2}}", 
+                content: { text: "I'd be glad to get you the information you need. To make sure I'm providing the most helpful details, could I ask what specifically you're interested in learning about?" }
             }
         ]
     ],
