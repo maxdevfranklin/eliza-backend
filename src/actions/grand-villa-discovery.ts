@@ -1,5 +1,5 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
-import { discoveryStateProvider, saveUserResponse, getUserResponses } from "../providers/discovery-state.js";
+import { discoveryStateProvider, saveUserResponse, getUserResponses, updateUserStatus } from "../providers/discovery-state.js";
 
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
@@ -240,17 +240,20 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     //Decide to move on to the next or to final
     const context = `I asked the user if they're okay with me asking a few questions before we begin. Their response was: ${_message.content.text}
 
-                    Please analyze this response and provide TWO things in JSON format:
-                    1. A brief report about the user's current status, needs, and what they want
-                    2. A warm, caring follow-up question to understand their deeper motivation
+            Please analyze this response and provide TWO things in JSON format:
+            1. A brief report about the user's current status, needs, and what they want
+            2. A warm, caring follow-up question that does NOT move too far forward. Simply thank them for their response and naturally ask something like:
+            - What brought them here today?
+            - What’s feeling most important or concerning for them right now?
+            - How has this been affecting their daily life or family?
 
-                    Return your response in this exact JSON format:
-                    {
-                        "userReport": "Brief analysis of user's status, needs, and what they want based on their response",
-                        "responseMessage": "A caring follow-up question to understand their deeper motivation - ask about what made them reach out, their biggest concern, or how this affects their family. Keep it natural, empathetic, reflect user's response and not too long."
-                    }
-                    
-                    Make sure to return ONLY valid JSON, no additional text.`;
+            Return your response in this exact JSON format:
+            {
+                "userReport": "Brief analysis of user's status, needs, and what they want based on their response",
+                "responseMessage": "Thank them for their response and ask ONE caring, natural question about what brought them here today, what feels most important or concerning, or how this has been affecting their life or family. Keep it short, warm, and empathetic and not too short"
+            }
+
+            Make sure to return ONLY valid JSON, no additional text.`;
 
     const aiResponse = await generateText({
         runtime: _runtime,
@@ -274,14 +277,15 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         elizaLogger.info(answer);
         elizaLogger.info(`=============================`);
         
-        // TODO: You can now use userReport for analytics, database storage, etc.
-        // For example: await saveUserStatusReport(_runtime, _message, userReport);
+        // Save the user status report
+        await updateUserStatus(_runtime, _message, userReport);
         
     } catch (error) {
         elizaLogger.error("Failed to parse JSON response:", error);
         // Fallback to using the entire response as the answer
         answer = aiResponse;
         userReport = `Unable to parse user status from response: ${_message.content.text}`;
+        await updateUserStatus(_runtime, _message, userReport);
     }
 
     // Store the asked question in memory with stage transition
@@ -292,8 +296,8 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         content: {
             text: answer,
             metadata: { 
-                askedQuestion: userReport,
-                stage: "lifestyle_discovery"  // Set the next stage in metadata
+                askedQuestion: answer,
+                stage: "lifestyle_discovery"
             }
         }
     });
@@ -312,15 +316,59 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     elizaLogger.info(`=== LIFESTYLE DISCOVERY STAGE ===`);
     elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
     elizaLogger.info(`=================================`)
     
-    // Get previous user answers from situation discovery stage
-    // const userAnswersFromSituationStage = await getUserAnswersFromStage(_runtime, _message, "lifestyle_discovery");
-    const userAnswersFromSituationStage = _message.content.text;
-    
-    
+    // Analyze user response and update status using AI
+    const context = `Current user status: "${discoveryState.userStatus}"
+                    User's latest response about lifestyle: "${_message.content.text}"
+                    
+                    Please analyze this lifestyle information and provide TWO things in JSON format:
+                    1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
+                    2. A warm, caring follow-up question that feels natural and human  based on current user status, asking about their mom or dad's daily life. You can ask things like:
+                    - Tell me about your mom/dad, What does a typical day look like for them?
+                    - What are some things they really love doing these days?
+                    - Is there something they’ve always enjoyed but haven’t been able to do lately?
+                    
+                    Return your response in this exact JSON format:
+                    {
+                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new lifestyle information",
+                        "responseMessage": "Thank them for their response and ask ONE caring, natural question about their mom or dad’s daily routine, what they love doing, or something they’ve stopped doing recently. Keep it warm, empathetic, and not too short."
+                    }
+                    
+                    Make sure to return ONLY valid JSON, no additional text.`;
+    const aiResponse = await generateText({
+        runtime: _runtime,
+        context: context,
+        modelClass: ModelClass.SMALL
+    });
 
-    let question = await generatePersonalizedLifestyleQuestion(_runtime, _message, _state, userAnswersFromSituationStage, "daily_routine");
+    // Parse the JSON response
+    let updatedUserStatus = "";
+    let answer = "";
+    
+    try {
+        const parsed = JSON.parse(aiResponse);
+        updatedUserStatus = parsed.updatedUserStatus || "";
+        answer = parsed.responseMessage || "";
+        
+        // Log the extracted information
+        elizaLogger.info(`=== UPDATED USER STATUS ===`);
+        elizaLogger.info(updatedUserStatus);
+        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
+        elizaLogger.info(answer);
+        elizaLogger.info(`===========================`);
+        
+        // Save the updated user status
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to parse JSON response:", error);
+        // Fallback to using the entire response as the answer
+        answer = aiResponse;
+        updatedUserStatus = `${discoveryState.userStatus} | Lifestyle update: ${_message.content.text}`;
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
+    }
 
     // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
@@ -328,14 +376,14 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         userId: _message.userId,
         agentId: _message.agentId,
         content: {
-            text: question,
+            text: answer,
             metadata: { 
-                askedQuestion: question,
-                stage: "readiness_discovery"  // Set the next stage in metadata
+                askedQuestion: answer,
+                stage: "readiness_discovery"
             }
         }
     });
-    return question;
+    return answer;
 }
 
 // Readiness Discovery Handler
@@ -350,27 +398,59 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     elizaLogger.info(`=== READINESS DISCOVERY STAGE ===`);
     elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
     elizaLogger.info(`=================================`)
     
-    // Get previous user answer
-    const userResponse = _message.content.text;
+    // Analyze user response and update status using AI
+    const context = `Current user status: "${discoveryState.userStatus}"
+                    User's latest response about readiness: "${_message.content.text}"
+
+                    Please analyze this readiness information and provide TWO things in JSON format:
+                    1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
+                    2. A warm, caring follow-up question that feels natural and human based on current user status, asking something like:
+                    - Is your mom or dad aware that you’re looking into options right now?
+                    - How do they feel about the idea of moving or making a change?
+                    - Who else is involved in supporting or helping make this decision with you?
+
+                    Return your response in this exact JSON format:
+                    {
+                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new readiness information",
+                        "responseMessage": "Thank them for their response and ask ONE caring, natural question about their mom or dad’s awareness, feelings about moving, or who else is involved in helping make decisions. Keep it warm, empathetic, reliable, and not too short or robotic."
+                    }
+
+                    Make sure to return ONLY valid JSON, no additional text.`;
+
+    const aiResponse = await generateText({
+        runtime: _runtime,
+        context: context,
+        modelClass: ModelClass.SMALL
+    });
+
+    // Parse the JSON response
+    let updatedUserStatus = "";
+    let answer = "";
     
-    // Get the number of readiness questions already asked
-    const readinessQuestionsAsked = discoveryState.questionsAsked.filter((q: string) => 
-        q.includes("aware that you're looking") || q.includes("feel about the idea")
-    ).length;
-    
-    let question = "";
-    
-    if (readinessQuestionsAsked === 0) {
-        // First readiness question - about awareness
-        question = await generatePersonalizedReadinessQuestion(_runtime, _message, _state, userResponse, "awareness");
-    } else if (readinessQuestionsAsked === 1) {
-        // Second readiness question - about feelings
-        question = await generatePersonalizedReadinessQuestion(_runtime, _message, _state, userResponse, "feelings");
-    } else {
-        // All readiness questions have been asked
-        question = "Thank you for sharing that with me.";
+    try {
+        const parsed = JSON.parse(aiResponse);
+        updatedUserStatus = parsed.updatedUserStatus || "";
+        answer = parsed.responseMessage || "";
+        
+        // Log the extracted information
+        elizaLogger.info(`=== UPDATED USER STATUS ===`);
+        elizaLogger.info(updatedUserStatus);
+        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
+        elizaLogger.info(answer);
+        elizaLogger.info(`===========================`);
+        
+        // Save the updated user status
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to parse JSON response:", error);
+        // Fallback to using the entire response as the answer
+        answer = aiResponse;
+        updatedUserStatus = `${discoveryState.userStatus} | Readiness update: ${_message.content.text}`;
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
     }
 
     // Store the asked question in memory with stage transition
@@ -379,14 +459,14 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         userId: _message.userId,
         agentId: _message.agentId,
         content: {
-            text: question,
+            text: answer,
             metadata: { 
-                askedQuestion: question,
-                stage: "priorities_discovery"  // Set the next stage in metadata
+                askedQuestion: answer,
+                stage: "priorities_discovery"
             }
         }
     });
-    return question;
+    return answer;
 }
 
 // Priority Discovery Handler
@@ -401,27 +481,58 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     elizaLogger.info(`=== PRIORITY DISCOVERY STAGE ===`);
     elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
     elizaLogger.info(`================================`)
     
-    // Get previous user answer
-    const userResponse = _message.content.text;
+    // Analyze user response and update status using AI
+    const context = `Current user status: "${discoveryState.userStatus}"
+                    User's latest response about priorities: "${_message.content.text}"
+
+                    Please analyze this priority information and provide TWO things in JSON format:
+                    1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
+                    2. A warm, caring follow-up question that feels natural and human based on current user status, asking something like:
+                    - When you think about choosing a community, what feels most important to you and your family?
+                    - What kind of support do you feel would make the biggest difference for your mom or dad – or for your family as you go through this?
+
+                    Return your response in this exact JSON format:
+                    {
+                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new priority information",
+                        "responseMessage": "Thank them for their response and ask ONE caring, natural question about what’s most important to them in a community or what kind of support would be most meaningful right now. Keep it warm, empathetic, reliable, and not too short or robotic."
+                    }
+
+                    Make sure to return ONLY valid JSON, no additional text.`;
+
+    const aiResponse = await generateText({
+        runtime: _runtime,
+        context: context,
+        modelClass: ModelClass.SMALL
+    });
+
+    // Parse the JSON response
+    let updatedUserStatus = "";
+    let answer = "";
     
-    // Get the number of priority questions already asked
-    const priorityQuestionsAsked = discoveryState.questionsAsked.filter((q: string) => 
-        q.includes("most important") || q.includes("biggest difference")
-    ).length;
-    
-    let question = "";
-    
-    if (priorityQuestionsAsked === 0) {
-        // First priority question - about community values
-        question = await generatePersonalizedPriorityQuestion(_runtime, _message, _state, userResponse, "community_values");
-    } else if (priorityQuestionsAsked === 1) {
-        // Second priority question - about support needs
-        question = await generatePersonalizedPriorityQuestion(_runtime, _message, _state, userResponse, "support_needs");
-    } else {
-        // All priority questions have been asked
-        question = "Thank you for sharing that with me.";
+    try {
+        const parsed = JSON.parse(aiResponse);
+        updatedUserStatus = parsed.updatedUserStatus || "";
+        answer = parsed.responseMessage || "";
+        
+        // Log the extracted information
+        elizaLogger.info(`=== UPDATED USER STATUS ===`);
+        elizaLogger.info(updatedUserStatus);
+        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
+        elizaLogger.info(answer);
+        elizaLogger.info(`===========================`);
+        
+        // Save the updated user status
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to parse JSON response:", error);
+        // Fallback to using the entire response as the answer
+        answer = aiResponse;
+        updatedUserStatus = `${discoveryState.userStatus} | Priority update: ${_message.content.text}`;
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
     }
 
     // Store the asked question in memory with stage transition
@@ -430,14 +541,14 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         userId: _message.userId,
         agentId: _message.agentId,
         content: {
-            text: question,
+            text: answer,
             metadata: { 
-                askedQuestion: question,
-                stage: "needs_matching"  // Set the next stage in metadata
+                askedQuestion: answer,
+                stage: "needs_matching"
             }
         }
     });
-    return question;
+    return answer;
 }
 
 // Needs Matching Handler
@@ -464,7 +575,10 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     elizaLogger.info(`Current user message: ${_message.content.text}`);
     elizaLogger.info(`===============================`);
     
-    // Combine all responses for analysis
+    // Get current user status for final analysis
+    elizaLogger.info(`Current user status before final analysis: ${discoveryState.userStatus}`);
+    
+    // Combine all responses for comprehensive analysis
     const allUserResponses = [
         ...situationResponses,
         ...lifestyleResponses,
@@ -472,18 +586,22 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         ...prioritiesResponses
     ].join(" ");
     
+    const finalStatusUpdate = `Complete discovery phase finished. Current status: ${discoveryState.userStatus}. All responses: ${allUserResponses}. Ready for needs matching and Grand Villa recommendations.`;
+    await updateUserStatus(_runtime, _message, finalStatusUpdate);
+    
     // Generate personalized needs matching response based on all user responses
     try {
-        const prompt = `Based on all the user's responses about their family's situation and needs: "${allUserResponses}", 
-                       generate a warm, personalized response that:
-                       1. Acknowledges specific details they mentioned about their loved one
-                       2. Recommends Grand Villa as a senior living community
-                       3. Matches specific Grand Villa features to their mentioned needs and concerns
-                       4. Shows empathy and understanding of their situation
-                       5. Explains how Grand Villa can address their specific lifestyle, readiness, and priority concerns
-                       6. Ends with suggesting a visit to experience the community firsthand
-                       
-                       Keep the tone conversational, caring, and professional. Reference specific details from their responses.`;
+        const prompt = `Current comprehensive user status: "${discoveryState.userStatus}"
+                        All user responses throughout discovery: "${allUserResponses}"
+
+                        Based on this complete understanding of their family's situation and needs, generate a warm, personalized response that:
+                        1. Recaps what you’ve heard from them about their loved one’s situation, needs, and concerns
+                        2. Shows empathy and understanding, acknowledging specific details they shared
+                        3. Matches their concerns and priorities with how Grand Villa’s features, services, and community can help address them
+                        4. Guides them toward considering Grand Villa by highlighting why it could be a good fit for their loved one
+                        5. Ends with suggesting a visit to experience the community firsthand
+
+                        Keep the tone conversational, caring, and professional. Reference specific details from their responses to build trust and connection.`;
         
         const personalizedResponse = await generateText({
             runtime: _runtime,
@@ -502,9 +620,9 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     // Fallback to default response if generation fails
     const fallbackResponse = `Based on everything you've shared with me, I can see how much you care about finding the right place for your loved one. Grand Villa is a wonderful community that offers both comfort and peace of mind. The staff there are known for being warm and attentive, and they really focus on making residents feel at home. 
 
-Grand Villa has beautiful outdoor spaces and a variety of activities that residents enjoy — from crafts and games to social gatherings. It's a place that balances independence with just the right amount of support.
+                                Grand Villa has beautiful outdoor spaces and a variety of activities that residents enjoy — from crafts and games to social gatherings. It's a place that balances independence with just the right amount of support.
 
-I think Grand Villa could be a great fit for your family. Would you like to schedule a visit so you can experience the community firsthand and see what daily life would feel like?`;
+                                I think Grand Villa could be a great fit for your family. Would you like to schedule a visit so you can experience the community firsthand and see what daily life would feel like?`;
     
     return fallbackResponse;
 }

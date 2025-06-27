@@ -14,6 +14,7 @@ type Stage = typeof VALID_STAGES[number];
 
 interface MessageMetadata {
     stage?: Stage;
+    status?: string;
     askedQuestion?: string;
 }
 
@@ -38,7 +39,8 @@ export const discoveryStateProvider: Provider = {
             identifiedNeeds: [],
             concernsShared: [],
             readyForVisit: false,
-            visitScheduled: false
+            visitScheduled: false,
+            userStatus: "" // New field to track user status
         };
         
         // Process messages from oldest to newest to preserve latest stage transitions
@@ -54,47 +56,32 @@ export const discoveryStateProvider: Provider = {
                 continue;
             }
             
+            // Track user status from metadata
+            if (metadata?.status) {
+                elizaLogger.info(`Found user status update: ${metadata.status}`);
+                discoveryState.userStatus = metadata.status;
+            }
+            
             // Track asked questions from metadata
             if (metadata?.askedQuestion) {
                 discoveryState.questionsAsked.push(metadata.askedQuestion);
             }
             
-            // Only process questions and needs if we're in the appropriate stage
-            if (discoveryState.currentStage === "trust_building") {
-                // Trust Building Stage - no questions to track yet
-                continue;
+            // Track identified needs
+            if (text.includes("eat") || text.includes("meal") || text.includes("food") || text.includes("nutrition")) {
+                discoveryState.identifiedNeeds.push("nutrition");
             }
-            
-            if (discoveryState.currentStage === "situation_discovery") {
-                // Situation Discovery Stage
-                if (text.includes("what made you decide")) {
-                    discoveryState.questionsAsked.push("What made you decide to call us today?");
-                }
-                if (text.includes("greatest concern")) {
-                    discoveryState.questionsAsked.push("What's your greatest concern right now?");
-                }
-                if (text.includes("impacting your family")) {
-                    discoveryState.questionsAsked.push("How is this situation impacting your family?");
-                }
+            if (text.includes("activity") || text.includes("hobby") || text.includes("garden")) {
+                discoveryState.identifiedNeeds.push("activities");
             }
-            
-            // Track identified needs only after situation discovery
-            if (!["trust_building", "situation_discovery"].includes(discoveryState.currentStage)) {
-                if (text.includes("eat") || text.includes("meal") || text.includes("food") || text.includes("nutrition")) {
-                    discoveryState.identifiedNeeds.push("nutrition");
-                }
-                if (text.includes("activity") || text.includes("hobby") || text.includes("garden")) {
-                    discoveryState.identifiedNeeds.push("activities");
-                }
-                if (text.includes("safe") || text.includes("fall") || text.includes("emergency")) {
-                    discoveryState.identifiedNeeds.push("safety");
-                }
-                if (text.includes("social") || text.includes("lonely") || text.includes("friend")) {
-                    discoveryState.identifiedNeeds.push("social");
-                }
-                if (text.includes("independent") || text.includes("freedom")) {
-                    discoveryState.identifiedNeeds.push("independence");
-                }
+            if (text.includes("safe") || text.includes("fall") || text.includes("emergency")) {
+                discoveryState.identifiedNeeds.push("safety");
+            }
+            if (text.includes("social") || text.includes("lonely") || text.includes("friend")) {
+                discoveryState.identifiedNeeds.push("social");
+            }
+            if (text.includes("independent") || text.includes("freedom")) {
+                discoveryState.identifiedNeeds.push("independence");
             }
             
             // Track concerns
@@ -164,4 +151,22 @@ export async function getUserResponses(runtime: IAgentRuntime, message: Memory) 
     
     elizaLogger.info(`Retrieved user responses: ${JSON.stringify(userResponses)}`);
     return userResponses;
+}
+
+// New utility function to update user status
+export async function updateUserStatus(runtime: IAgentRuntime, message: Memory, statusUpdate: string) {
+    elizaLogger.info(`Updating user status: ${statusUpdate}`);
+    
+    await runtime.messageManager.createMemory({
+        roomId: message.roomId,
+        userId: message.userId,
+        agentId: message.agentId,
+        content: {
+            text: `[Status Update] ${statusUpdate}`,
+            metadata: {
+                status: statusUpdate,
+                timestamp: new Date().toISOString()
+            }
+        }
+    });
 }
