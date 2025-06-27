@@ -61,11 +61,13 @@ export function createAgent(
     evaluators: [],
     character,
     plugins: [
-      bootstrapPlugin,
+      // Remove or comment out plugins that might have competing actions
+      // bootstrapPlugin,  // <-- Comment this out temporarily
       nodePlugin,
       character.settings?.secrets?.WALLET_PUBLIC_KEY ? solanaPlugin : null,
     ].filter(Boolean),
     providers: [discoveryStateProvider],
+    // ONLY register YOUR action - no other actions
     actions: [grandVillaDiscoveryAction],
     services: [],
     managers: [],

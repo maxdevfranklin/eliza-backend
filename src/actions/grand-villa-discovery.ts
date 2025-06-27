@@ -3,7 +3,7 @@ import { discoveryStateProvider, saveUserResponse, getUserResponses } from "../p
 
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
-    description: "Respond to any user message and guide families through conversations about senior living and Grand Villa discovery process",
+    description: "Universal handler that responds to every user message, regardless of content, intent, or topic. Always triggers to ensure no user input goes unhandled.",
     similes: [
         "HELLO", "HI", "HEY", "GREETINGS", "GOOD", "MORNING", "AFTERNOON", "EVENING", "NIGHT",
         "START", "BEGIN", "FIRST", "INITIAL", "OPENING", "WELCOME", "CHAT", "TALK", "SPEAK",
@@ -16,14 +16,14 @@ export const grandVillaDiscoveryAction: Action = {
         "SERVICES", "FACILITIES", "AMENITIES", "STAFF", "VISIT", "TOUR", "COSTS", "PRICING",
         "THANKS", "THANK", "YES", "NO", "OKAY", "OK", "SURE", "MAYBE", "PERHAPS", "POSSIBLY",
         "INTERESTED", "CURIOUS", "WONDERING", "ASK", "TELL", "EXPLAIN", "DESCRIBE", "SHOW",
-        "WHAT", "WHO", "WHERE", "WHEN", "HOW", "WHY", "WHICH", "WHOSE", "WHOM",
+        "WHAT", "WHO", "WHERE", "WHEN", "HOW", "WHY", "WHICH", "WHOSE","WHOM",
         "PLEASE", "SORRY", "EXCUSE", "UNDERSTAND", "KNOW", "THINK", "FEEL", "BELIEVE", 
         "HOPE", "WANT", "WISH", "LOVE", "LIKE", "PREFER", "CHOOSE", "SELECT",
         "BEST", "BETTER", "GREAT", "EXCELLENT", "PERFECT", "RIGHT", "CORRECT", "WRONG",
         "NEW", "OLD", "YOUNG", "BIG", "SMALL", "NICE", "BEAUTIFUL", "COMFORTABLE",
-        "AND", "OR", "BUT", "SO", "BECAUSE", "IF", "WHEN", "WHILE", "SINCE", "UNTIL",
+        "AND", "OR", "BUT", "SO", "BECAUSE", "IF", "WHEN", "WHILE", "SINCE",
         "MY", "YOUR", "HIS", "HER", "ITS", "OUR", "THEIR", "THIS", "THAT", "THESE", "THOSE",
-        "HERE", "THERE", "NOW", "THEN", "TODAY", "TOMORROW", "YESTERDAY", "SOON", "LATER"
+        "HERE", "THERE", "NOW", "THEN", "TODAY", "TOMORROW", "YESTERDAY", "SOON", "LATER" 
     ],
     examples: [
         [
@@ -79,15 +79,8 @@ export const grandVillaDiscoveryAction: Action = {
     ],
     
     validate: async (_runtime: IAgentRuntime, _message: Memory) => {
-        try {
-            const discoveryState = await getDiscoveryState(_runtime, _message);
-            elizaLogger.info(`Discovery state: ${JSON.stringify(discoveryState)}`);
-            elizaLogger.info("✅ Grand Villa action triggered successfully");
-            return true; // Always trigger for 100% reliability
-        } catch (error) {
-            elizaLogger.warn("Discovery state error, but still triggering action:", error);
-            return true; // Guarantee triggering even if state fails
-        }
+        elizaLogger.info("🎯 Grand Villa action - ALWAYS TRIGGERING");
+        return true; // Always return true - no conditions, no async calls, no errors
     },
     
     handler: async (
@@ -100,86 +93,110 @@ export const grandVillaDiscoveryAction: Action = {
         elizaLogger.info("🚀 Starting Grand Villa Discovery process");
         
         try {
-        
-        // Get current discovery state
-        const discoveryState = await getDiscoveryState(_runtime, _message);
-        elizaLogger.info(`📊 Current discovery state in handler: ${JSON.stringify(discoveryState)}`);
-        
-        // Show current user responses collected so far
-        const currentResponses = await getUserResponses(_runtime, _message);
-        elizaLogger.info(`💾 User responses collected so far: ${JSON.stringify(currentResponses, null, 2)}`);
-        
-        // Determine conversation stage and next action
-        const conversationStage = await determineConversationStage(_runtime, _message, discoveryState);
-        elizaLogger.info(`🎯 Determined conversation stage: ${conversationStage}`);
-        
-        let response_text = "";
-        
-        switch (conversationStage) {
-            case "trust_building":
-                elizaLogger.info("Entering trust_building case");
-                response_text = await handleTrustBuilding(_runtime, _message, _state);
-                elizaLogger.info(`Trust building response: ${response_text}`);
-                break;
-                
-            case "situation_discovery":
-                response_text = await handleSituationQuestions(_runtime, _message, _state, discoveryState);
-                break;
-                
-            case "lifestyle_discovery":
-                response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState);
-                break;
-                
-            case "readiness_discovery":
-                response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState);
-                break;
-                
-            case "priorities_discovery":
-                response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState);
-                break;
-                
-            case "needs_matching":
-                response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState);
-                break;
-                
-            case "visit_transition":
-                response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState);
-                break;
-                
-            default:
-                response_text = await handleGeneralInquiry(_runtime, _message, _state);
-        }
-        
-        // Ensure we always have a response
-        if (!response_text || response_text.trim() === "") {
-            response_text = "I'd be happy to help you learn more about Grand Villa and senior living options. What brings you here today?";
-            elizaLogger.warn("⚠️ Empty response detected, using fallback");
-        }
-        
-        _callback({ 
-          text: response_text,
-          metadata: {
-            stage: conversationStage,
-            actionName: "grand-villa-discovery",
-            reliability: "enhanced"
-          }
-        });
-        return true;
-        
-        } catch (error) {
-            elizaLogger.error("❌ Error in Grand Villa Discovery action:", error);
+            // Get discovery state with safe fallback
+            let discoveryState;
+            try {
+                discoveryState = await discoveryStateProvider.get(_runtime, _message);
+            } catch (error) {
+                elizaLogger.warn("Using fallback discovery state:", error);
+                discoveryState = {
+                    currentStage: "trust_building",
+                    questionsAsked: [],
+                    identifiedNeeds: [],
+                    concernsShared: [],
+                    readyForVisit: false,
+                    visitScheduled: false
+                };
+            }
             
-            // Ultimate fallback response
+            // Get user responses with safe fallback
+            let currentResponses;
+            try {
+                currentResponses = await getUserResponses(_runtime, _message);
+            } catch (error) {
+                elizaLogger.warn("Using empty user responses:", error);
+                currentResponses = { situation: [], lifestyle: [], readiness: [], priorities: [] };
+            }
+            
+            // Determine conversation stage with safe fallback
+            let conversationStage;
+            try {
+                conversationStage = await determineConversationStage(_runtime, _message, discoveryState);
+            } catch (error) {
+                elizaLogger.warn("Using fallback conversation stage:", error);
+                conversationStage = "trust_building";
+            }
+            
+            let response_text = "";
+            
+            // Handle each stage with error protection
+            try {
+                switch (conversationStage) {
+                    case "trust_building":
+                        response_text = await handleTrustBuilding(_runtime, _message, _state);
+                        break;
+                    case "situation_discovery":
+                        response_text = await handleSituationQuestions(_runtime, _message, _state, discoveryState);
+                        break;
+                    case "lifestyle_discovery":
+                        response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState);
+                        break;
+                    case "readiness_discovery":
+                        response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState);
+                        break;
+                    case "priorities_discovery":
+                        response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState);
+                        break;
+                    case "needs_matching":
+                        response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState);
+                        break;
+                    case "visit_transition":
+                        response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState);
+                        break;
+                    default:
+                        response_text = await handleGeneralInquiry(_runtime, _message, _state);
+                }
+            } catch (stageError) {
+                elizaLogger.error("Stage error, using fallback:", stageError);
+                response_text = "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
+            }
+            
+            // Triple fallback system
+            if (!response_text || response_text.trim() === "") {
+                response_text = "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
+                elizaLogger.warn("⚠️ Empty response - using primary fallback");
+            }
+            
+            if (!response_text || response_text.trim() === "") {
+                response_text = "Hello! I'm Grace, and I'm here to help you explore senior living options. How can I assist you today?";
+                elizaLogger.warn("⚠️ Primary fallback failed - using secondary fallback");
+            }
+            
+            _callback({ 
+                text: response_text,
+                metadata: {
+                    stage: conversationStage,
+                    actionName: "grand-villa-discovery",
+                    reliability: "guaranteed"
+                }
+            });
+            
+            return true; // Always return true
+            
+        } catch (error) {
+            elizaLogger.error("❌ Critical error - using ultimate fallback:", error);
+            
+            // Ultimate fallback that can never fail
             _callback({
-                text: "Thank you for your interest in senior living options. I'm here to help you find the right solution for your family. How can I assist you today?",
+                text: "Hello! I'm Grace, and I'm here to help you explore senior living options for your family. How can I assist you today?",
                 metadata: {
                     actionName: "grand-villa-discovery",
-                    fallback: true,
+                    fallback: "ultimate",
                     error: error.message
                 }
             });
             
-            return true; // Always return true to maintain reliability
+            return true; // Always return true even in ultimate fallback
         }
     }
 }
@@ -220,35 +237,67 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     elizaLogger.info(`Current user message: ${_message.content.text}`);
     elizaLogger.info(`================================`)
     
-    // const unansweredQuestions = [
-    //     "I'm really glad you reached out — it's a big step, and I'm here to listen. Can I ask what made you decide to call us today?",
-    //     "I really appreciate you taking the time to share your thoughts with me. To help me better understand what matters most to you at this moment… Could you tell me what's your greatest concern right now?", 
-    //     "Thanks for sharing all with me. Before we explore possible next steps, I'd like to understand a bit more about how things have been for you and your loved ones. How is this situation impacting your family?"
-    // ].filter(q => !discoveryState.questionsAsked.includes(q));
+    //Decide to move on to the next or to final
+    const context = `I asked the user if they're okay with me asking a few questions before we begin. Their response was: ${_message.content.text}
+
+                    Please analyze this response and provide TWO things in JSON format:
+                    1. A brief report about the user's current status, needs, and what they want
+                    2. A warm, caring follow-up question to understand their deeper motivation
+
+                    Return your response in this exact JSON format:
+                    {
+                        "userReport": "Brief analysis of user's status, needs, and what they want based on their response",
+                        "responseMessage": "A caring follow-up question to understand their deeper motivation - ask about what made them reach out, their biggest concern, or how this affects their family. Keep it natural, empathetic, reflect user's response and not too long."
+                    }
+                    
+                    Make sure to return ONLY valid JSON, no additional text.`;
+
+    const aiResponse = await generateText({
+        runtime: _runtime,
+        context: context,
+        modelClass: ModelClass.SMALL
+    });
+
+    // Parse the JSON response
+    let userReport = "";
+    let answer = "";
     
-    // let question = "";
-    // if (unansweredQuestions.length > 0) {
-    //     // Pick a random question
-    //     question = unansweredQuestions[Math.floor(Math.random() * unansweredQuestions.length)];
-    // } else {
-    //     // If all have been asked, just thank and move on
-    //     question = "Thank you for sharing that with me.";
-    // }
-    const question = "Thanks for sharing all with me. Before we explore possible next steps, I'd like to understand a bit more about how things have been for you and your loved ones. Could you tell me what made you decide to call us today?";
+    try {
+        const parsed = JSON.parse(aiResponse);
+        userReport = parsed.userReport || "";
+        answer = parsed.responseMessage || "";
+        
+        // Log the extracted information
+        elizaLogger.info(`=== EXTRACTED USER REPORT ===`);
+        elizaLogger.info(userReport);
+        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
+        elizaLogger.info(answer);
+        elizaLogger.info(`=============================`);
+        
+        // TODO: You can now use userReport for analytics, database storage, etc.
+        // For example: await saveUserStatusReport(_runtime, _message, userReport);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to parse JSON response:", error);
+        // Fallback to using the entire response as the answer
+        answer = aiResponse;
+        userReport = `Unable to parse user status from response: ${_message.content.text}`;
+    }
+
     // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
         content: {
-            text: question,
+            text: answer,
             metadata: { 
-                // askedQuestion: question,
+                askedQuestion: userReport,
                 stage: "lifestyle_discovery"  // Set the next stage in metadata
             }
         }
     });
-    return question;
+    return answer;
 }
 
 // Lifestyle Discovery Handler  
@@ -269,26 +318,9 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     // const userAnswersFromSituationStage = await getUserAnswersFromStage(_runtime, _message, "lifestyle_discovery");
     const userAnswersFromSituationStage = _message.content.text;
     
-    // Get the number of lifestyle questions already asked
-    const lifestyleQuestionsAsked = discoveryState.questionsAsked.filter((q: string) => 
-        q.includes("typical day") || q.includes("love doing") || q.includes("stopped doing")
-    ).length;
     
-    let question = "";
-    
-    if (lifestyleQuestionsAsked === 0) {
-        // First lifestyle question - personalized based on situation discovery
-        question = await generatePersonalizedLifestyleQuestion(_runtime, _message, _state, userAnswersFromSituationStage, "daily_routine");
-    } else if (lifestyleQuestionsAsked === 1) {
-        // Second lifestyle question - about activities they love
-        question = await generatePersonalizedLifestyleQuestion(_runtime, _message, _state, userAnswersFromSituationStage, "activities");
-    } else if (lifestyleQuestionsAsked === 2) {
-        // Third lifestyle question - about activities they've stopped
-        question = await generatePersonalizedLifestyleQuestion(_runtime, _message, _state, userAnswersFromSituationStage, "stopped_activities");
-    } else {
-        // All lifestyle questions have been asked
-        question = "Thank you for sharing that with me.";
-    }
+
+    let question = await generatePersonalizedLifestyleQuestion(_runtime, _message, _state, userAnswersFromSituationStage, "daily_routine");
 
     // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
