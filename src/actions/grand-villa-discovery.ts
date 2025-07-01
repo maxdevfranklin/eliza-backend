@@ -703,10 +703,15 @@ async function moveToNextStage(_runtime: IAgentRuntime, _message: Memory, nextSt
 
 // Helper function to get user answers from a specific stage
 async function getUserAnswersFromStage(_runtime: IAgentRuntime, _message: Memory, stage: string): Promise<string[]> {
-    const memories = await _runtime.messageManager.getMemories({
+    const allMemories = await _runtime.messageManager.getMemories({
         roomId: _message.roomId,
         count: 50
     });
+    
+    // Filter memories to only include those from this specific user or agent
+    const memories = allMemories.filter(mem => 
+        mem.userId === _message.userId || mem.userId === _message.agentId
+    );
     
     const userAnswers: string[] = [];
     let stageStartIndex = -1;

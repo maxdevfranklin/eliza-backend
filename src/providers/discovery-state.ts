@@ -24,11 +24,16 @@ export const discoveryStateProvider: Provider = {
         elizaLogger.info("Getting discovery state from message history");
         
         // Get or create discovery state from memory
-        const existingState = await runtime.messageManager.getMemories({
+        const allMemories = await runtime.messageManager.getMemories({
             roomId: message.roomId,
             count: 50,
             unique: false
         });
+        
+        // Filter memories to only include those from this specific user or agent
+        const existingState = allMemories.filter(mem => 
+            mem.userId === userId || mem.userId === message.agentId
+        );
         
         elizaLogger.info(`Found ${existingState.length} messages in history`);
         
@@ -126,11 +131,16 @@ export async function saveUserResponse(runtime: IAgentRuntime, message: Memory, 
 }
 
 export async function getUserResponses(runtime: IAgentRuntime, message: Memory) {
-    const memories = await runtime.messageManager.getMemories({
+    const allMemories = await runtime.messageManager.getMemories({
         roomId: message.roomId,
         count: 100,
         unique: false
     });
+    
+    // Filter memories to only include those from this specific user or agent
+    const memories = allMemories.filter(mem => 
+        mem.userId === message.userId || mem.userId === message.agentId
+    );
     
     const userResponses: { [key: string]: string[] } = {
         situation: [],

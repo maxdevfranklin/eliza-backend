@@ -11,7 +11,7 @@ rl.on("SIGINT", () => {
   process.exit(0);
 });
 
-async function handleUserInput(input, agentId) {
+async function handleUserInput(input, agentId, userId = "console_user") {
   if (input.toLowerCase() === "exit") {
     rl.close();
     process.exit(0);
@@ -27,8 +27,8 @@ async function handleUserInput(input, agentId) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: input,
-          userId: "user",
-          userName: "User",
+          userId: userId,
+          userName: userId,
         }),
       }
     );
@@ -43,8 +43,11 @@ async function handleUserInput(input, agentId) {
 export function startChat(characters) {
   function chat() {
     const agentId = characters[0].name ?? "Agent";
+    const userId = `console_${Date.now()}`;
+    console.log(`Chat session started for user: ${userId}`);
+    
     rl.question("You: ", async (input) => {
-      await handleUserInput(input, agentId);
+      await handleUserInput(input, agentId, userId);
       if (input.toLowerCase() !== "exit") {
         chat(); // Loop back to ask another question
       }

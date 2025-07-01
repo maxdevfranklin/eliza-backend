@@ -28,6 +28,7 @@ import { grandVillaDiscoveryAction } from "./actions/grand-villa-discovery.ts";
 // import { newsAction } from "./actions/news-actions.ts";
 // import { grandvillaAction } from "./actions/grand-villa.ts";
 import { discoveryStateProvider } from "./providers/discovery-state.ts";
+import { AuthServer } from "./server/auth-server.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -146,9 +147,15 @@ const startAgents = async () => {
     characters = await loadCharacters(charactersArg);
   }
   console.log("characters", characters);
+  
+  let firstRuntime: any = null;
+  
   try {
     for (const character of characters) {
-      await startAgent(character, directClient as DirectClient);
+      const runtime = await startAgent(character, directClient as DirectClient);
+      if (!firstRuntime) {
+        firstRuntime = runtime;
+      }
     }
   } catch (error) {
     elizaLogger.error("Error starting agents:", error);
@@ -164,6 +171,27 @@ const startAgents = async () => {
     // wrap it so we don't have to inject directClient later
     return startAgent(character, directClient);
   };
+
+  // Initialize authentication server on a separate port
+  if (firstRuntime) {
+    const authServer = new AuthServer(firstRuntime);
+    const authPort = 3002; // Fixed port for auth server
+    
+    // Create a simple HTTP server for authentication endpoints
+    const { createServer } = await import('http');
+    const httpServer = createServer(async (req, res) => {
+      const authMiddleware = authServer.createMiddleware();
+      await authMiddleware(req, res);
+    });
+    
+    httpServer.listen(authPort, () => {
+      elizaLogger.info(`Authentication server started on port ${authPort}`);
+      elizaLogger.info("Authentication endpoints available at:");
+      elizaLogger.info(`  POST http://localhost:${authPort}/auth/register`);
+      elizaLogger.info(`  POST http://localhost:${authPort}/auth/login`);
+      elizaLogger.info(`  POST http://localhost:${authPort}/auth/verify`);
+    });
+  }
 
   directClient.start(serverPort);
 
