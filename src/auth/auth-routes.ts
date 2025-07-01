@@ -7,8 +7,19 @@ export class AuthRoutes {
   private userDb: UserDatabase;
 
   constructor(runtime: IAgentRuntime) {
-    this.userDb = new UserDatabase(runtime);
+    this.userDb = new UserDatabase(runtime.databaseAdapter);
     this.authService = new AuthService(this.userDb);
+    
+    this.initializeUserDatabase();
+  }
+
+  private async initializeUserDatabase() {
+    try {
+      await this.userDb.initialize();
+      elizaLogger.info("User database initialized successfully");
+    } catch (error) {
+      elizaLogger.error("Failed to initialize user database:", error);
+    }
   }
 
   // Handle registration endpoint

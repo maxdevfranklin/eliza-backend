@@ -10,11 +10,17 @@ export interface User {
 }
 
 export class UserDatabase {
-  private db: any;
+  private dbAdapter: any;
+  private isPostgres: boolean;
 
   constructor(databaseAdapter: any) {
-    this.db = databaseAdapter.db || databaseAdapter;
-    this.initializeUsersTable();
+    this.dbAdapter = databaseAdapter;
+    // Check if this is a PostgreSQL adapter
+    this.isPostgres = !!databaseAdapter.query || !!databaseAdapter.connectionString;
+  }
+
+  async initialize() {
+    await this.initializeUsersTable();
   }
 
   private async initializeUsersTable() {
@@ -22,24 +28,85 @@ export class UserDatabase {
       // Create users table if it doesn't exist
       const sql = `
         CREATE TABLE IF NOT EXISTS users (
-          id TEXT PRIMARY KEY,
-          username TEXT UNIQUE NOT NULL,
-          email TEXT UNIQUE NOT NULL,
-          password TEXT NOT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
+            id TEXT NOT NULL,
+            username TEXT NOT NULL,
+            email TEXT NOT NULL,
+            password TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT users_username_unique UNIQUE (username),
+            CONSTRAINT users_email_unique UNIQUE (email),
+            CONSTRAINT users_pk PRIMARY KEY (id)
+        );
       `;
       
-      if (this.db && this.db.exec) {
-        await this.db.exec(sql);
-        elizaLogger.info("Users table initialized successfully");
+      await this.executeQuery(sql);
+      elizaLogger.info("Users table initialized successfully");
+    } catch (error) {
+      // If table already exists, that's OK
+      if (error.message && (error.message.includes('already exists') || error.message.includes('relation') && error.message.includes('already exists'))) {
+        elizaLogger.info("Users table already exists");
+        return;
+      }
+      elizaLogger.error("Error initializing users table:", error);
+      throw error;
+    }
+  }
+
+  private async executeQuery(sql: string, params: any[] = []): Promise<any> {
+    try {
+      if (this.isPostgres) {
+        // For PostgreSQL adapter
+        if (this.dbAdapter.query) {
+          return await this.dbAdapter.query(sql, params);
+        } else if (this.dbAdapter.db && this.dbAdapter.db.query) {
+          return await this.dbAdapter.db.query(sql, params);
+        } else {
+          throw new Error("PostgreSQL query method not found");
+        }
       } else {
-        elizaLogger.error("Database connection not available");
-        throw new Error("Database connection not available");
+        // For SQLite adapter
+        const db = this.dbAdapter.db || this.dbAdapter;
+        if (db.prepare) {
+          return await db.prepare(sql).run(...params);
+        } else if (db.run) {
+          return await db.run(sql, params);
+        } else {
+          throw new Error("SQLite query method not found");
+        }
       }
     } catch (error) {
-      elizaLogger.error("Error initializing users table:", error);
+      elizaLogger.error("Error executing query:", error);
+      throw error;
+    }
+  }
+
+  private async queryRow(sql: string, params: any[] = []): Promise<any> {
+    try {
+      if (this.isPostgres) {
+        // For PostgreSQL adapter
+        let result;
+        if (this.dbAdapter.query) {
+          result = await this.dbAdapter.query(sql, params);
+        } else if (this.dbAdapter.db && this.dbAdapter.db.query) {
+          result = await this.dbAdapter.db.query(sql, params);
+        } else {
+          throw new Error("PostgreSQL query method not found");
+        }
+        return result.rows && result.rows.length > 0 ? result.rows[0] : null;
+      } else {
+        // For SQLite adapter
+        const db = this.dbAdapter.db || this.dbAdapter;
+        if (db.prepare) {
+          return await db.prepare(sql).get(...params);
+        } else if (db.get) {
+          return await db.get(sql, params);
+        } else {
+          throw new Error("SQLite query method not found");
+        }
+      }
+    } catch (error) {
+      elizaLogger.error("Error querying row:", error);
       throw error;
     }
   }
@@ -49,23 +116,25 @@ export class UserDatabase {
       const id = this.generateUserId();
       const now = new Date();
       
+      // Use parameterized query
       const sql = `
         INSERT INTO users (id, username, email, password, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5, $6)
       `;
       
-      if (this.db && this.db.prepare) {
-        await this.db.prepare(sql).run(
-          id,
-          user.username,
-          user.email,
-          user.password,
-          now.toISOString(),
-          now.toISOString()
-        );
-      } else {
-        throw new Error("Database connection not available");
-      }
+      const params = [
+        id,
+        user.username,
+        user.email,
+        user.password,
+        now.toISOString(),
+        now.toISOString()
+      ];
+
+      // For SQLite, convert $1, $2, etc. to ? placeholders
+      const sqliteSQL = this.isPostgres ? sql : sql.replace(/\$(\d+)/g, '?');
+      
+      await this.executeQuery(sqliteSQL, params);
 
       return {
         id,
@@ -83,12 +152,11 @@ export class UserDatabase {
 
   async getUserByEmail(email: string): Promise<User | null> {
     try {
-      const sql = `SELECT * FROM users WHERE email = ?`;
-      if (!this.db || !this.db.prepare) {
-        throw new Error("Database connection not available");
-      }
+      const sql = this.isPostgres ? 
+        `SELECT * FROM users WHERE email = $1` :
+        `SELECT * FROM users WHERE email = ?`;
       
-      const row = await this.db.prepare(sql).get(email);
+      const row = await this.queryRow(sql, [email]);
       
       if (!row) return null;
       
@@ -108,12 +176,11 @@ export class UserDatabase {
 
   async getUserByUsername(username: string): Promise<User | null> {
     try {
-      const sql = `SELECT * FROM users WHERE username = ?`;
-      if (!this.db || !this.db.prepare) {
-        throw new Error("Database connection not available");
-      }
+      const sql = this.isPostgres ?
+        `SELECT * FROM users WHERE username = $1` :
+        `SELECT * FROM users WHERE username = ?`;
       
-      const row = await this.db.prepare(sql).get(username);
+      const row = await this.queryRow(sql, [username]);
       
       if (!row) return null;
       
@@ -133,12 +200,11 @@ export class UserDatabase {
 
   async getUserById(id: string): Promise<User | null> {
     try {
-      const sql = `SELECT * FROM users WHERE id = ?`;
-      if (!this.db || !this.db.prepare) {
-        throw new Error("Database connection not available");
-      }
+      const sql = this.isPostgres ?
+        `SELECT * FROM users WHERE id = $1` :
+        `SELECT * FROM users WHERE id = ?`;
       
-      const row = await this.db.prepare(sql).get(id);
+      const row = await this.queryRow(sql, [id]);
       
       if (!row) return null;
       
