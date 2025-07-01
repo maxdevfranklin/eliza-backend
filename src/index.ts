@@ -172,28 +172,67 @@ const startAgents = async () => {
     return startAgent(character, directClient);
   };
 
-  // Initialize authentication server on a separate port
+  // Start DirectClient on an internal port (serverPort + 1000 to avoid conflicts)
+  const directClientPort = serverPort + 1000;
+  while (!(await checkPortAvailable(directClientPort))) {
+    elizaLogger.warn(`Internal port ${directClientPort} is in use, trying ${directClientPort + 1}`);
+  }
+  directClient.start(directClientPort);
+  elizaLogger.info(`DirectClient started on internal port ${directClientPort}`);
+
+  // Create integrated server with auth and message proxying
   if (firstRuntime) {
     const authServer = new AuthServer(firstRuntime);
-    const authPort = 3002; // Fixed port for auth server
+    const { createServer, request } = await import('http');
     
-    // Create a simple HTTP server for authentication endpoints
-    const { createServer } = await import('http');
-    const httpServer = createServer(async (req, res) => {
-      const authMiddleware = authServer.createMiddleware();
-      await authMiddleware(req, res);
+    // Helper function to proxy requests
+    const proxyRequest = (req: any, res: any) => {
+      const options = {
+        hostname: 'localhost',
+        port: directClientPort,
+        path: req.url,
+        method: req.method,
+        headers: req.headers,
+      };
+
+      const proxyReq = request(options, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+        proxyRes.pipe(res, { end: true });
+      });
+
+      proxyReq.on('error', (error) => {
+        elizaLogger.error('Proxy error:', error);
+        res.statusCode = 500;
+        res.end('Internal Server Error');
+      });
+
+      req.pipe(proxyReq, { end: true });
+    };
+
+    // Create main integrated server
+    const integratedServer = createServer(async (req, res) => {
+      const url = new URL(req.url || '/', `http://${req.headers.host}`);
+      const pathname = url.pathname;
+
+      // Handle auth requests with AuthServer middleware
+      if (pathname.startsWith('/auth/')) {
+        const authMiddleware = authServer.createMiddleware();
+        await authMiddleware(req, res);
+      } else {
+        // Proxy all other requests to DirectClient
+        proxyRequest(req, res);
+      }
     });
     
-    httpServer.listen(authPort, () => {
-      elizaLogger.info(`Authentication server started on port ${authPort}`);
-      elizaLogger.info("Authentication endpoints available at:");
-      elizaLogger.info(`  POST http://localhost:${authPort}/auth/register`);
-      elizaLogger.info(`  POST http://localhost:${authPort}/auth/login`);
-      elizaLogger.info(`  POST http://localhost:${authPort}/auth/verify`);
+    integratedServer.listen(serverPort, () => {
+      elizaLogger.info(`Integrated server started on port ${serverPort}`);
+      elizaLogger.info("Available endpoints:");
+      elizaLogger.info(`  Message API: http://localhost:${serverPort}/{agentId}/message`);
+      elizaLogger.info(`  POST http://localhost:${serverPort}/auth/register`);
+      elizaLogger.info(`  POST http://localhost:${serverPort}/auth/login`);
+      elizaLogger.info(`  POST http://localhost:${serverPort}/auth/verify`);
     });
   }
-
-  directClient.start(serverPort);
 
   if (serverPort !== parseInt(settings.SERVER_PORT || "3000")) {
     elizaLogger.log(`Server started on alternate port ${serverPort}`);
