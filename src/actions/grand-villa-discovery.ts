@@ -590,18 +590,18 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     await updateUserStatus(_runtime, _message, finalStatusUpdate);
     
     // Generate personalized needs matching response based on all user responses
+    let finalResponse = "";
     try {
         const prompt = `Current comprehensive user status: "${discoveryState.userStatus}"
                         All user responses throughout discovery: "${allUserResponses}"
 
-                        Based on this complete understanding of their family's situation and needs, generate a warm, personalized response that:
-                        1. Recaps what you’ve heard from them about their loved one’s situation, needs, and concerns
-                        2. Shows empathy and understanding, acknowledging specific details they shared
-                        3. Matches their concerns and priorities with how Grand Villa’s features, services, and community can help address them
-                        4. Guides them toward considering Grand Villa by highlighting why it could be a good fit for their loved one
-                        5. Ends with suggesting a visit to experience the community firsthand
+                        Based on this understanding, generate a short, warm response that:
+                        1. Briefly recaps their loved one's main needs and concerns
+                        2. Shows empathy in a natural, caring way
+                        3. Simply explains why Grand Villa is a good fit for their situation
+                        4. Encourages them to visit Grand Villa to see it for themselves
 
-                        Keep the tone conversational, caring, and professional. Reference specific details from their responses to build trust and connection.`;
+                        Keep it conversational, caring, and professional. Be short and clear, not too long.`;
         
         const personalizedResponse = await generateText({
             runtime: _runtime,
@@ -611,20 +611,34 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         
         if (personalizedResponse) {
             elizaLogger.info(`Generated personalized needs matching response: ${personalizedResponse}`);
-            return personalizedResponse;
+            finalResponse = personalizedResponse;
         }
     } catch (error) {
         elizaLogger.error(`Error generating personalized needs matching response: ${error}`);
     }
-    
+
     // Fallback to default response if generation fails
-    const fallbackResponse = `Based on everything you've shared with me, I can see how much you care about finding the right place for your loved one. Grand Villa is a wonderful community that offers both comfort and peace of mind. The staff there are known for being warm and attentive, and they really focus on making residents feel at home. 
-
-                                Grand Villa has beautiful outdoor spaces and a variety of activities that residents enjoy — from crafts and games to social gatherings. It's a place that balances independence with just the right amount of support.
-
-                                I think Grand Villa could be a great fit for your family. Would you like to schedule a visit so you can experience the community firsthand and see what daily life would feel like?`;
+    if (!finalResponse) {
+        finalResponse = `Based on everything you've shared with me, I can see how much you care about finding the right place for your loved one. Grand Villa is a wonderful community that offers both comfort and peace of mind. The staff there are known for being warm and attentive, and they really focus on making residents feel at home. 
+                        Grand Villa has beautiful outdoor spaces and a variety of activities that residents enjoy — from crafts and games to social gatherings. It's a place that balances independence with just the right amount of support.
+                        I think Grand Villa could be a great fit for your family. Would you like to schedule a visit so you can experience the community firsthand and see what daily life would feel like?`;
+    }
     
-    return fallbackResponse;
+    // Store the needs matching response in memory with stage transition
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+            text: finalResponse,
+            metadata: { 
+                askedQuestion: finalResponse,
+                stage: "needs_matching"
+            }
+        }
+    });
+    
+    return finalResponse;
 }
 
 // Visit Transition Handler
