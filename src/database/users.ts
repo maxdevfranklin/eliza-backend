@@ -177,8 +177,8 @@ export class UserDatabase {
   async getUserByUsername(username: string): Promise<User | null> {
     try {
       const sql = this.isPostgres ?
-        `SELECT * FROM users WHERE username = $1` :
-        `SELECT * FROM users WHERE username = ?`;
+        `SELECT * FROM accounts WHERE username = $1` :
+        `SELECT * FROM accounts WHERE username = ?`;
       
       const row = await this.queryRow(sql, [username]);
       

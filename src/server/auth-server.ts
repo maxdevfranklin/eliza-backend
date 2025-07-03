@@ -94,6 +94,13 @@ export class AuthServer {
         return true;
       }
 
+      if (pathname === '/auth/delete-history' && req.method === 'DELETE') {
+        const body = await this.parseBody(req);
+        const result = await this.authRoutes.handleDeleteHistory(body);
+        this.sendJsonResponse(res, result.status, result.data);
+        return true;
+      }
+
       // If it's an auth route but not handled above, return 404
       if (pathname.startsWith('/auth/')) {
         this.sendJsonResponse(res, 404, { success: false, message: 'Endpoint not found' });

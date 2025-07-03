@@ -5,10 +5,15 @@ import { UserDatabase } from '../database/users.ts';
 export class AuthRoutes {
   private authService: AuthService;
   private userDb: UserDatabase;
+  private runtime: IAgentRuntime;
+  private isPostgres: boolean;
 
   constructor(runtime: IAgentRuntime) {
+    this.runtime = runtime;
     this.userDb = new UserDatabase(runtime.databaseAdapter);
     this.authService = new AuthService(this.userDb);
+    // Check if this is a PostgreSQL adapter
+    this.isPostgres = !!(runtime.databaseAdapter as any).query || !!(runtime.databaseAdapter as any).connectionString;
     
     this.initializeUserDatabase();
   }
@@ -138,6 +143,109 @@ export class AuthRoutes {
       };
     } catch (error) {
       elizaLogger.error('Verify token endpoint error:', error);
+      return {
+        status: 500,
+        data: {
+          success: false,
+          message: 'Internal server error'
+        }
+      };
+    }
+  }
+
+  // Handle delete history endpoint
+  async handleDeleteHistory(body: any): Promise<{ status: number; data: any }> {
+    try {
+      const { userId } = body;
+
+      if (!userId) {
+        return {
+          status: 400,
+          data: {
+            success: false,
+            message: 'User ID is required'
+          }
+        };
+      }
+
+      elizaLogger.info(`Deleting conversation history for username: ${userId}`);
+
+      // First, find the actual user ID from the username
+      const user = await this.userDb.getUserByUsername(userId);
+      if (!user) {
+        return {
+          status: 404,
+          data: {
+            success: false,
+            message: 'User not found'
+          }
+        };
+      }
+
+      const actualUserId = user.id;
+      elizaLogger.info(`Found user ID: ${actualUserId} for username: ${userId}`);
+
+      // Use database adapter directly for bulk deletion
+      const dbAdapter = this.runtime.databaseAdapter as any;
+      
+      try {
+        // Check if this is PostgreSQL or SQLite and execute appropriate delete query
+        let deletedCount = 0;
+        
+        if (this.isPostgres) {
+          // PostgreSQL adapter
+          let result;
+          if (dbAdapter.query) {
+            result = await dbAdapter.query(
+              'DELETE FROM memories WHERE "userId" = $1',
+              [actualUserId]
+            );
+          } else if (dbAdapter.db && dbAdapter.db.query) {
+            result = await dbAdapter.db.query(
+              'DELETE FROM memories WHERE "userId" = $1',
+              [actualUserId]
+            );
+          } else {
+            throw new Error("PostgreSQL query method not found");
+          }
+          deletedCount = result.rowCount || 0;
+        } else {
+          // SQLite adapter
+          const db = dbAdapter.db || dbAdapter;
+          if (db.prepare) {
+            const stmt = db.prepare('DELETE FROM memories WHERE userId = ?');
+            const result = stmt.run(actualUserId);
+            deletedCount = result.changes || 0;
+          } else if (db.run) {
+            const result = await db.run('DELETE FROM memories WHERE userId = ?', [actualUserId]);
+            deletedCount = result.changes || 0;
+          } else {
+            throw new Error("SQLite query method not found");
+          }
+        }
+
+        elizaLogger.info(`Successfully deleted ${deletedCount} messages for user ${userId} (ID: ${actualUserId})`);
+
+        return {
+          status: 200,
+          data: {
+            success: true,
+            message: `Deleted ${deletedCount} messages from conversation history`,
+            deletedCount
+          }
+        };
+      } catch (dbError) {
+        elizaLogger.error('Database deletion error:', dbError);
+        return {
+          status: 500,
+          data: {
+            success: false,
+            message: 'Failed to delete messages from database'
+          }
+        };
+      }
+    } catch (error) {
+      elizaLogger.error('Delete history endpoint error:', error);
       return {
         status: 500,
         data: {
