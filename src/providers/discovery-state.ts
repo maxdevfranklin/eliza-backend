@@ -7,6 +7,7 @@ const VALID_STAGES = [
     "readiness_discovery",
     "priorities_discovery",
     "needs_matching",
+    "info_sharing",
     "visit_transition"
 ] as const;
 

@@ -150,6 +150,9 @@ export const grandVillaDiscoveryAction: Action = {
                     case "needs_matching":
                         response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState);
                         break;
+                    case "info_sharing":
+                        response_text = await handleInfoSharing(_runtime, _message, _state, discoveryState);
+                        break;
                     case "visit_transition":
                         response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState);
                         break;
@@ -242,15 +245,17 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
 
             Please analyze this response and provide TWO things in JSON format:
             1. A brief report about the user's current status, needs, and what they want
-            2. A warm, caring follow-up question that does NOT move too far forward. Simply thank them for their response and naturally ask something like:
-            - What brought them here today?
-            - What’s feeling most important or concerning for them right now?
-            - How has this been affecting their daily life or family?
+            2. A thoughtful, empathetic response that:
+               - First acknowledges and validates their response with understanding
+               - Shows genuine care and empathy for their situation
+               - Provides a brief, relevant insight or reassurance about their feelings/concerns
+               - Then naturally transitions to asking what brought them here today or what feels most important to them right now
+               - Should be warm, conversational, and show deep understanding (not too short, but not overly long)
 
             Return your response in this exact JSON format:
             {
                 "userReport": "Brief analysis of user's status, needs, and what they want based on their response",
-                "responseMessage": "Thank them for their response and ask ONE caring, natural question about what brought them here today, what feels most important or concerning, or how this has been affecting their life or family. Keep it short, warm, and empathetic and not too short"
+                "responseMessage": "A thoughtful response that acknowledges their answer, shows empathy and understanding, provides brief insight or reassurance, then naturally asks what brought them here today or what feels most important. Keep it warm, genuine, conversational, and LIMIT TO 40 WORDS OR LESS."
             }
 
             Make sure to return ONLY valid JSON, no additional text.`;
@@ -321,19 +326,21 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     
     // Analyze user response and update status using AI
     const context = `Current user status: "${discoveryState.userStatus}"
-                    User's latest response about lifestyle: "${_message.content.text}"
+                    User's latest response about their situation: "${_message.content.text}"
                     
-                    Please analyze this lifestyle information and provide TWO things in JSON format:
+                    Please analyze this information and provide TWO things in JSON format:
                     1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
-                    2. A warm, caring follow-up question that feels natural and human  based on current user status, asking about their mom or dad's daily life. You can ask things like:
-                    - Tell me about your mom/dad, What does a typical day look like for them?
-                    - What are some things they really love doing these days?
-                    - Is there something they’ve always enjoyed but haven’t been able to do lately?
+                    2. A thoughtful, empathetic response that:
+                       - First acknowledges and validates what they shared about their situation
+                       - Shows genuine understanding of their concerns and feelings
+                       - Provides reassurance or insight about their experience (e.g., "That sounds really challenging" or "You're clearly very thoughtful about this")
+                       - Then naturally transitions to asking about their loved one's daily life or what they enjoy doing
+                       - Should demonstrate deep listening and emotional intelligence
                     
                     Return your response in this exact JSON format:
                     {
-                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new lifestyle information",
-                        "responseMessage": "Thank them for their response and ask ONE caring, natural question about their mom or dad’s daily routine, what they love doing, or something they’ve stopped doing recently. Keep it warm, empathetic, and not too short."
+                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new information",
+                        "responseMessage": "A thoughtful response that acknowledges their situation, shows understanding and empathy, provides reassurance or validation, then naturally asks about their loved one's daily life or activities they enjoy. Keep it warm, genuine, conversational, and LIMIT TO 35 WORDS OR LESS."
                     }
                     
                     Make sure to return ONLY valid JSON, no additional text.`;
@@ -403,19 +410,21 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     
     // Analyze user response and update status using AI
     const context = `Current user status: "${discoveryState.userStatus}"
-                    User's latest response about readiness: "${_message.content.text}"
+                    User's latest response about their loved one's lifestyle: "${_message.content.text}"
 
-                    Please analyze this readiness information and provide TWO things in JSON format:
+                    Please analyze this lifestyle information and provide TWO things in JSON format:
                     1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
-                    2. A warm, caring follow-up question that feels natural and human based on current user status, asking something like:
-                    - Is your mom or dad aware that you’re looking into options right now?
-                    - How do they feel about the idea of moving or making a change?
-                    - Who else is involved in supporting or helping make this decision with you?
+                    2. A thoughtful, empathetic response that:
+                       - First acknowledges and validates what they shared about their loved one's daily life and activities
+                       - If they mentioned specific interests (reading, sewing, gardening, music, crafts, cooking, etc.), briefly mention how wonderful those interests are
+                       - Connect their interests to similar activities available at senior communities (like "book clubs" for readers, "sewing circles" for sewers, "gardening groups" for gardeners)
+                       - Then naturally transitions to asking about their loved one's awareness of the situation or readiness for change
+                       - Should demonstrate care for both the user and their loved one
 
                     Return your response in this exact JSON format:
                     {
-                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new readiness information",
-                        "responseMessage": "Thank them for their response and ask ONE caring, natural question about their mom or dad’s awareness, feelings about moving, or who else is involved in helping make decisions. Keep it warm, empathetic, reliable, and not too short or robotic."
+                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new lifestyle information",
+                        "responseMessage": "A thoughtful response that acknowledges their loved one's lifestyle, appreciates their interests, briefly connects interests to community activities (book clubs, sewing groups, etc.), then naturally asks about their loved one's awareness or readiness. Keep it warm, genuine, conversational, and LIMIT TO 40 WORDS OR LESS."
                     }
 
                     Make sure to return ONLY valid JSON, no additional text.`;
@@ -486,18 +495,21 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     
     // Analyze user response and update status using AI
     const context = `Current user status: "${discoveryState.userStatus}"
-                    User's latest response about priorities: "${_message.content.text}"
+                    User's latest response about their loved one's readiness: "${_message.content.text}"
 
-                    Please analyze this priority information and provide TWO things in JSON format:
+                    Please analyze this readiness information and provide TWO things in JSON format:
                     1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
-                    2. A warm, caring follow-up question that feels natural and human based on current user status, asking something like:
-                    - When you think about choosing a community, what feels most important to you and your family?
-                    - What kind of support do you feel would make the biggest difference for your mom or dad – or for your family as you go through this?
+                    2. A thoughtful, empathetic response that:
+                       - First acknowledges and validates what they shared about their loved one's readiness and feelings
+                       - Shows genuine understanding of the emotional complexity of the situation
+                       - Provides reassurance or insight about the transition process or their loved one's feelings
+                       - Then naturally transitions to asking about their priorities in choosing a community or what support would be most meaningful
+                       - Should demonstrate sensitivity to the emotional aspects of this decision
 
                     Return your response in this exact JSON format:
                     {
-                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new priority information",
-                        "responseMessage": "Thank them for their response and ask ONE caring, natural question about what’s most important to them in a community or what kind of support would be most meaningful right now. Keep it warm, empathetic, reliable, and not too short or robotic."
+                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new readiness information",
+                        "responseMessage": "A thoughtful response that acknowledges their loved one's readiness, shows understanding of the emotional complexity, provides reassurance about the process, then naturally asks about their priorities or support needs. Keep it warm, genuine, conversational, and LIMIT TO 35 WORDS OR LESS."
                     }
 
                     Make sure to return ONLY valid JSON, no additional text.`;
@@ -596,12 +608,12 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
                         All user responses throughout discovery: "${allUserResponses}"
 
                         Based on this understanding, generate a short, warm response that:
-                        1. Briefly recaps their loved one's main needs and concerns
-                        2. Shows empathy in a natural, caring way
-                        3. Simply explains why Grand Villa is a good fit for their situation
-                        4. Encourages them to visit Grand Villa to see it for themselves
+                        1. Briefly acknowledges their loved one's main needs and personality
+                        2. If they mentioned specific interests (reading, sewing, gardening, music, crafts, cooking, games, etc.), specifically mention how Grand Villa has those activities (book clubs, sewing circles, gardening groups, music programs, art classes, cooking activities, game nights, etc.)
+                        3. Simply explains why Grand Villa feels like a good fit for their situation
+                        4. Encourages them to visit to see it for themselves
 
-                        Keep it conversational, caring, and professional. Be short and clear, not too long.`;
+                        Keep it conversational, caring, and personal. LIMIT TO 60 WORDS OR LESS. Make it feel like you really listened to their specific situation.`;
         
         const personalizedResponse = await generateText({
             runtime: _runtime,
@@ -619,9 +631,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
 
     // Fallback to default response if generation fails
     if (!finalResponse) {
-        finalResponse = `Based on everything you've shared with me, I can see how much you care about finding the right place for your loved one. Grand Villa is a wonderful community that offers both comfort and peace of mind. The staff there are known for being warm and attentive, and they really focus on making residents feel at home. 
-                        Grand Villa has beautiful outdoor spaces and a variety of activities that residents enjoy — from crafts and games to social gatherings. It's a place that balances independence with just the right amount of support.
-                        I think Grand Villa could be a great fit for your family. Would you like to schedule a visit so you can experience the community firsthand and see what daily life would feel like?`;
+        finalResponse = `I can see how much you care about finding the right place. Grand Villa has wonderful activities like book clubs, sewing circles, gardening groups, and music programs. The staff really focus on making residents feel at home. Would you like to visit so you can see what daily life would feel like?`;
     }
     
     // Store the needs matching response in memory with stage transition
@@ -633,12 +643,88 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
             text: finalResponse,
             metadata: { 
                 askedQuestion: finalResponse,
-                stage: "needs_matching"
+                stage: "info_sharing"
             }
         }
     });
     
     return finalResponse;
+}
+
+// Info Sharing Handler
+async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    // Save user response from this stage
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        await saveUserResponse(_runtime, _message, "info_sharing", _message.content.text);
+    }
+    
+    // Show previous user responses collected so far
+    const previousResponses = await getUserResponses(_runtime, _message);
+    elizaLogger.info(`=== INFO SHARING STAGE ===`);
+    elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
+    elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
+    elizaLogger.info(`==============================`)
+    
+    // Generate response using AI with Grand Villa information as context
+    const context = `User asked: "${_message.content.text}"
+                    Current user status: "${discoveryState.userStatus}"
+                    
+                    Grand Villa Information:
+                    Grand Villa has locations in Florida, California, and Colorado.
+                    They offer Independent Living, Assisted Living, Memory Care, and Respite Care.
+                    Facilities include dining, medication management, housekeeping, laundry, fitness centers, gardens, walking trails, salon, barber, transportation, and activity programs.
+                    Rooms are private or companion style with kitchenettes, cable TV, and Wi-Fi.
+                    Staff is available 24 hours with emergency call systems.
+                    
+                    Pricing examples:
+                    Sarasota, FL: contact for rates.
+                    Escondido, CA: starts at $4,800 per month.
+                    Grand Junction, CO: $4,587 to $5,963 per month.
+                    Ormond Beach, FL: $3,195 to $4,095 per month.
+                    New Port Richey, FL: studios from $3,095, one-bedrooms from $3,695.
+                    
+                    Activities include book clubs, sewing circles, gardening groups, music programs, art classes, cooking activities, game nights, yoga, bingo, painting, wellness programs, and outings.
+                    They provide medication delivery, technology-enabled care tracking, and hurricane preparedness in Florida locations.
+                    Their environment is family-friendly and looks like a home with a resort-style feel.
+                    They have flexible monthly rates covering most services.
+                    They also offer senior day programs and short-term stays for respite care.
+                    
+                    Please provide a helpful, warm response that answers the user's question using the Grand Villa information above. If they ask about activities, mention specific ones that match interests mentioned earlier in the conversation. Keep it short, simple and clear - LIMIT TO 40 WORDS OR LESS. Make it personal and caring.`;
+    
+    let response = "";
+    try {
+        const aiResponse = await generateText({
+            runtime: _runtime,
+            context: context,
+            modelClass: ModelClass.SMALL
+        });
+        
+        response = aiResponse || "I'd be happy to help you learn more about Grand Villa. What would you like to know?";
+    } catch (error) {
+        elizaLogger.error("Error generating AI response for info sharing:", error);
+        response = "I'd be happy to help you learn more about Grand Villa. What would you like to know?";
+    }
+    
+    // Update user status with the information shared
+    const updatedStatus = `${discoveryState.userStatus} | Asked about: ${_message.content.text}`;
+    await updateUserStatus(_runtime, _message, updatedStatus);
+    
+    // Store the response in memory with stage transition to visit_transition
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+            text: response,
+            metadata: { 
+                askedQuestion: response,
+                stage: "info_sharing"
+            }
+        }
+    });
+    
+    return response;
 }
 
 // Visit Transition Handler
@@ -964,5 +1050,5 @@ function getDefaultPriorityQuestion(questionType: string): string {
 }
 
 async function handleGeneralInquiry(_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<string> {
-    return "I'd be happy to help you learn more about Grand Villa. Could you tell me what specific information you're looking for?";
+    return "I'd be happy to help you learn more about Grand Villa. What would you like to know?";
 }
