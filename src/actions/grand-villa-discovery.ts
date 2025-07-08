@@ -207,23 +207,184 @@ export const grandVillaDiscoveryAction: Action = {
 // Trust Building Handler
 async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<string> {
     elizaLogger.info("Handling trust building stage");
-    const response = "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
     
-    // Store the response and stage transition in a single message
+    // Check if user provided a response (not the first interaction)
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        // Get all user responses from trust building stage so far
+        let trustBuildingResponses = await getUserAnswersFromStage(_runtime, _message, "trust_building");
+        
+        // Fallback: if stage-based approach returns empty, get all user messages in conversation
+        if (trustBuildingResponses.length === 0) {
+            elizaLogger.info("Stage-based approach returned empty, using fallback to get all user messages");
+            const allMemories = await _runtime.messageManager.getMemories({
+                roomId: _message.roomId,
+                count: 50
+            });
+            
+            trustBuildingResponses = allMemories
+                .filter(mem => mem.userId !== _message.agentId && mem.content.text.trim())
+                .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
+                .map(mem => mem.content.text);
+            
+            elizaLogger.info(`Fallback collected ${trustBuildingResponses.length} user messages`);
+        }
+        
+        const allTrustBuildingText = trustBuildingResponses.join(" ");
+        
+        elizaLogger.info(`=== TRUST BUILDING RESPONSES ===`);
+        elizaLogger.info(`All trust building responses: ${JSON.stringify(trustBuildingResponses)}`);
+        elizaLogger.info(`Combined text: ${allTrustBuildingText}`);
+        elizaLogger.info(`===============================`);
+        
+        // Check if we already have any contact info stored
+        let existingContactInfo = await getContactInfo(_runtime, _message);
+        
+        // Try to extract name and phone number from ALL trust building responses
+        const extractionContext = `Please extract the user's name and phone number from these responses: "${allTrustBuildingText}"
+
+            Look for:
+            - Full name (first and last name)
+            - Phone number (any format: xxx-xxx-xxxx, (xxx) xxx-xxxx, xxx.xxx.xxxx, xxxxxxxxxx)
+            
+            ${existingContactInfo ? `Note: We may already have some info - Name: ${existingContactInfo.name || 'none'}, Phone: ${existingContactInfo.phone || 'none'}` : ''}
+            
+            Return your response in this exact JSON format:
+            {
+                "name": "extracted full name or null if not found",
+                "phone": "extracted phone number in clean format (xxx-xxx-xxxx) or null if not found",
+                "foundName": true/false,
+                "foundPhone": true/false
+            }
+            
+            Make sure to return ONLY valid JSON, no additional text.`;
+
+        try {
+            const aiResponse = await generateText({
+                runtime: _runtime,
+                context: extractionContext,
+                modelClass: ModelClass.SMALL
+            });
+
+            const parsed = JSON.parse(aiResponse);
+            
+            // Merge with existing info if we have any
+            let finalName = parsed.foundName && parsed.name ? parsed.name : (existingContactInfo?.name || null);
+            let finalPhone = parsed.foundPhone && parsed.phone ? parsed.phone : (existingContactInfo?.phone || null);
+            
+            elizaLogger.info(`=== NAME & PHONE EXTRACTION ===`);
+            elizaLogger.info(`Extracted name: ${parsed.foundName ? parsed.name : 'NO'}`);
+            elizaLogger.info(`Extracted phone: ${parsed.foundPhone ? parsed.phone : 'NO'}`);
+            elizaLogger.info(`Final name: ${finalName || 'NO'}`);
+            elizaLogger.info(`Final phone: ${finalPhone || 'NO'}`);
+            elizaLogger.info(`==============================`);
+
+            // If we found both name and phone, save them and proceed
+            if (finalName && finalPhone) {
+                const contactInfo = {
+                    name: finalName,
+                    phone: finalPhone,
+                    collectedAt: new Date().toISOString()
+                };
+                
+                // Save contact information (overwrite any previous partial info)
+                await saveUserResponse(_runtime, _message, "contact_info", JSON.stringify(contactInfo));
+                
+                // Update user status with contact information
+                const statusUpdate = `Contact collected - Name: ${finalName}, Phone: ${finalPhone}`;
+                await updateUserStatus(_runtime, _message, statusUpdate);
+                
+                // Move to next stage with personalized response
+                const response = `Thank you, ${finalName}! I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.`;
+                
+                await _runtime.messageManager.createMemory({
+                    roomId: _message.roomId,
+                    userId: _message.userId,
+                    agentId: _message.agentId,
+                    content: { 
+                        text: response,
+                        metadata: {
+                            stage: "situation_discovery"
+                        }
+                    }
+                });
+                
+                elizaLogger.info(`Stored complete contact info and moving to situation_discovery`);
+                return response;
+            }
+            
+            // Save partial contact info if we have new information
+            if (finalName || finalPhone) {
+                const partialContactInfo = {
+                    name: finalName,
+                    phone: finalPhone,
+                    collectedAt: new Date().toISOString()
+                };
+                await saveUserResponse(_runtime, _message, "contact_info", JSON.stringify(partialContactInfo));
+            }
+            
+            // If we're missing name or phone, ask for what's missing
+            let missingInfoResponse = "";
+            if (!finalName && !finalPhone) {
+                missingInfoResponse = "I'd love to help you! To get started, could I get your name and phone number? That way I can provide you with personalized information and follow up if needed.";
+            } else if (!finalName) {
+                missingInfoResponse = `Thanks for the phone number! Could I also get your name so I can personalize our conversation?`;
+            } else if (!finalPhone) {
+                missingInfoResponse = `Thanks, ${finalName}! Could I also get your phone number? That way I can follow up with any additional information that might be helpful.`;
+            }
+            
+            // Stay in trust building stage
+            await _runtime.messageManager.createMemory({
+                roomId: _message.roomId,
+                userId: _message.userId,
+                agentId: _message.agentId,
+                content: { 
+                    text: missingInfoResponse,
+                    metadata: {
+                        stage: "trust_building"
+                    }
+                }
+            });
+            
+            return missingInfoResponse;
+            
+        } catch (error) {
+            elizaLogger.error("Error extracting name/phone:", error);
+            // Fallback to asking for contact info
+            const fallbackResponse = "I'd love to help you! To get started, could I get your name and phone number? That way I can provide you with personalized information and follow up if needed.";
+            
+            await _runtime.messageManager.createMemory({
+                roomId: _message.roomId,
+                userId: _message.userId,
+                agentId: _message.agentId,
+                content: { 
+                    text: fallbackResponse,
+                    metadata: {
+                        stage: "trust_building"
+                    }
+                }
+            });
+            
+            return fallbackResponse;
+        }
+    }
+    
+    // First interaction - ask for name and phone
+    const initialResponse = "Hello! I'm Grace, and I'm here to help you explore senior living options for your family. To get started, could I get your name and phone number? That way I can provide you with personalized information and follow up if needed.";
+    
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
         content: { 
-            text: response,
+            text: initialResponse,
             metadata: {
-                stage: "situation_discovery"
+                stage: "trust_building"
             }
         }
     });
     
-    elizaLogger.info(`Stored response and stage transition to situation_discovery`);
-    return response;
+    elizaLogger.info(`Stored initial contact request in trust_building stage`);
+    return initialResponse;
 }
 
 // Situation Discovery Handler
@@ -233,15 +394,20 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         await saveUserResponse(_runtime, _message, "situation", _message.content.text);
     }
     
+    // Get contact information for personalization
+    const contactInfo = await getContactInfo(_runtime, _message);
+    const userName = contactInfo?.name ? contactInfo.name.split(' ')[0] : "";
+    
     // Show previous user responses collected so far
     const previousResponses = await getUserResponses(_runtime, _message);
     elizaLogger.info(`=== SITUATION DISCOVERY STAGE ===`);
     elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`Contact info: ${JSON.stringify(contactInfo)}`);
     elizaLogger.info(`================================`)
     
     //Decide to move on to the next or to final
-    const context = `I asked the user if they're okay with me asking a few questions before we begin. Their response was: ${_message.content.text}
+    const context = `The user ${userName ? `(${userName}) ` : ''}responded to my request to ask questions before we begin. Their response was: ${_message.content.text}
 
             Please analyze this response and provide TWO things in JSON format:
             1. A brief report about the user's current status, needs, and what they want
@@ -799,6 +965,25 @@ async function moveToNextStage(_runtime: IAgentRuntime, _message: Memory, nextSt
     elizaLogger.info(`Moving to stage: ${nextStage}`);
     
     return "";
+}
+
+// Helper function to get stored contact information
+async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{name?: string, phone?: string} | null> {
+    try {
+        const userResponses = await getUserResponses(_runtime, _message);
+        const contactInfoArray = userResponses.contact_info || [];
+        
+        if (contactInfoArray.length > 0) {
+            const latestContactInfo = contactInfoArray[contactInfoArray.length - 1];
+            const parsed = JSON.parse(latestContactInfo);
+            elizaLogger.info(`Retrieved contact info: Name=${parsed.name}, Phone=${parsed.phone}`);
+            return { name: parsed.name, phone: parsed.phone };
+        }
+    } catch (error) {
+        elizaLogger.error("Error retrieving contact info:", error);
+    }
+    
+    return null;
 }
 
 // Helper function to get user answers from a specific stage
