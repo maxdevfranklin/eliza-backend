@@ -286,8 +286,13 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
                     collectedAt: new Date().toISOString()
                 };
                 
+                elizaLogger.info(`=== SAVING CONTACT INFO ===`);
+                elizaLogger.info(`contactInfo object: ${JSON.stringify(contactInfo)}`);
+                elizaLogger.info(`contactInfo JSON string: ${JSON.stringify(contactInfo)}`);
+                
                 // Save contact information (overwrite any previous partial info)
                 await saveUserResponse(_runtime, _message, "contact_info", JSON.stringify(contactInfo));
+                elizaLogger.info(`Contact info saved to contact_info category`);
                 
                 // Update user status with contact information
                 const statusUpdate = `Contact collected - Name: ${finalName}, Phone: ${finalPhone}`;
@@ -319,7 +324,12 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
                     phone: finalPhone,
                     collectedAt: new Date().toISOString()
                 };
+                
+                elizaLogger.info(`=== SAVING PARTIAL CONTACT INFO ===`);
+                elizaLogger.info(`partialContactInfo object: ${JSON.stringify(partialContactInfo)}`);
+                
                 await saveUserResponse(_runtime, _message, "contact_info", JSON.stringify(partialContactInfo));
+                elizaLogger.info(`Partial contact info saved to contact_info category`);
             }
             
             // If we're missing name or phone, ask for what's missing
@@ -394,16 +404,16 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         await saveUserResponse(_runtime, _message, "situation", _message.content.text);
     }
     
-    // Get contact information for personalization
-    const contactInfo = await getContactInfo(_runtime, _message);
-    const userName = contactInfo?.name ? contactInfo.name.split(' ')[0] : "";
+    // Get contact information for personalization (randomly use name)
+    const useName = shouldUseName();
+    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     
     // Show previous user responses collected so far
     const previousResponses = await getUserResponses(_runtime, _message);
     elizaLogger.info(`=== SITUATION DISCOVERY STAGE ===`);
     elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
-    elizaLogger.info(`Contact info: ${JSON.stringify(contactInfo)}`);
+    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     elizaLogger.info(`================================`)
     
     //Decide to move on to the next or to final
@@ -412,6 +422,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
             Please analyze this response and provide TWO things in JSON format:
             1. A brief report about the user's current status, needs, and what they want
             2. A thoughtful, empathetic response that:
+               - ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response` : 'Begin warmly without using a name'}
                - First acknowledges and validates their response with understanding
                - Shows genuine care and empathy for their situation
                - Provides a brief, relevant insight or reassurance about their feelings/concerns
@@ -421,7 +432,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
             Return your response in this exact JSON format:
             {
                 "userReport": "Brief analysis of user's status, needs, and what they want based on their response",
-                "responseMessage": "A thoughtful response that acknowledges their answer, shows empathy and understanding, provides brief insight or reassurance, then naturally asks what brought them here today or what feels most important. Keep it warm, genuine, conversational, and LIMIT TO 40 WORDS OR LESS."
+                "responseMessage": "A thoughtful response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges their answer, shows empathy and understanding, provides brief insight or reassurance, then naturally asks what brought them here today or what feels most important. Keep it warm, genuine, conversational, and LIMIT TO 40 WORDS OR LESS."
             }
 
             Make sure to return ONLY valid JSON, no additional text.`;
@@ -482,21 +493,27 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         await saveUserResponse(_runtime, _message, "lifestyle", _message.content.text);
     }
     
+    // Get user name for potential personalization (randomly use name)
+    const useName = shouldUseName();
+    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    
     // Show previous user responses collected so far
     const previousResponses = await getUserResponses(_runtime, _message);
     elizaLogger.info(`=== LIFESTYLE DISCOVERY STAGE ===`);
     elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
     elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
+    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     elizaLogger.info(`=================================`)
     
     // Analyze user response and update status using AI
     const context = `Current user status: "${discoveryState.userStatus}"
-                    User's latest response about their situation: "${_message.content.text}"
+                    User ${userName ? `(${userName}) ` : ''}latest response about their situation: "${_message.content.text}"
                     
                     Please analyze this information and provide TWO things in JSON format:
                     1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
                     2. A thoughtful, empathetic response that:
+                       - ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response` : 'Begin warmly without using a name'}
                        - First acknowledges and validates what they shared about their situation
                        - Shows genuine understanding of their concerns and feelings
                        - Provides reassurance or insight about their experience (e.g., "That sounds really challenging" or "You're clearly very thoughtful about this")
@@ -506,7 +523,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
                     Return your response in this exact JSON format:
                     {
                         "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new information",
-                        "responseMessage": "A thoughtful response that acknowledges their situation, shows understanding and empathy, provides reassurance or validation, then naturally asks about their loved one's daily life or activities they enjoy. Keep it warm, genuine, conversational, and LIMIT TO 35 WORDS OR LESS."
+                        "responseMessage": "A thoughtful response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges their situation, shows understanding and empathy, provides reassurance or validation, then naturally asks about their loved one's daily life or activities they enjoy. Keep it warm, genuine, conversational, and LIMIT TO 35 WORDS OR LESS."
                     }
                     
                     Make sure to return ONLY valid JSON, no additional text.`;
@@ -566,21 +583,27 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         await saveUserResponse(_runtime, _message, "readiness", _message.content.text);
     }
     
+    // Get user name for potential personalization (randomly use name)
+    const useName = shouldUseName();
+    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    
     // Show previous user responses collected so far
     const previousResponses = await getUserResponses(_runtime, _message);
     elizaLogger.info(`=== READINESS DISCOVERY STAGE ===`);
     elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
     elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
+    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     elizaLogger.info(`=================================`)
     
     // Analyze user response and update status using AI
     const context = `Current user status: "${discoveryState.userStatus}"
-                    User's latest response about their loved one's lifestyle: "${_message.content.text}"
+                    User ${userName ? `(${userName}) ` : ''}latest response about their loved one's lifestyle: "${_message.content.text}"
 
                     Please analyze this lifestyle information and provide TWO things in JSON format:
                     1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
                     2. A thoughtful, empathetic response that:
+                       - ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response` : 'Begin warmly without using a name'}
                        - First acknowledges and validates what they shared about their loved one's daily life and activities
                        - If they mentioned specific interests (reading, sewing, gardening, music, crafts, cooking, etc.), briefly mention how wonderful those interests are
                        - Connect their interests to similar activities available at senior communities (like "book clubs" for readers, "sewing circles" for sewers, "gardening groups" for gardeners)
@@ -590,7 +613,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
                     Return your response in this exact JSON format:
                     {
                         "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new lifestyle information",
-                        "responseMessage": "A thoughtful response that acknowledges their loved one's lifestyle, appreciates their interests, briefly connects interests to community activities (book clubs, sewing groups, etc.), then naturally asks about their loved one's awareness or readiness. Keep it warm, genuine, conversational, and LIMIT TO 40 WORDS OR LESS."
+                        "responseMessage": "A thoughtful response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges their loved one's lifestyle, appreciates their interests, briefly connects interests to community activities (book clubs, sewing groups, etc.), then naturally asks about their loved one's awareness or readiness. Keep it warm, genuine, conversational, and LIMIT TO 40 WORDS OR LESS."
                     }
 
                     Make sure to return ONLY valid JSON, no additional text.`;
@@ -651,21 +674,27 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         await saveUserResponse(_runtime, _message, "priorities", _message.content.text);
     }
     
+    // Get user name for potential personalization (randomly use name)
+    const useName = shouldUseName();
+    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    
     // Show previous user responses collected so far
     const previousResponses = await getUserResponses(_runtime, _message);
     elizaLogger.info(`=== PRIORITY DISCOVERY STAGE ===`);
     elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
     elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
+    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     elizaLogger.info(`================================`)
     
     // Analyze user response and update status using AI
     const context = `Current user status: "${discoveryState.userStatus}"
-                    User's latest response about their loved one's readiness: "${_message.content.text}"
+                    User ${userName ? `(${userName}) ` : ''}latest response about their loved one's readiness: "${_message.content.text}"
 
                     Please analyze this readiness information and provide TWO things in JSON format:
                     1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
                     2. A thoughtful, empathetic response that:
+                       - ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response` : 'Begin warmly without using a name'}
                        - First acknowledges and validates what they shared about their loved one's readiness and feelings
                        - Shows genuine understanding of the emotional complexity of the situation
                        - Provides reassurance or insight about the transition process or their loved one's feelings
@@ -675,7 +704,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
                     Return your response in this exact JSON format:
                     {
                         "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new readiness information",
-                        "responseMessage": "A thoughtful response that acknowledges their loved one's readiness, shows understanding of the emotional complexity, provides reassurance about the process, then naturally asks about their priorities or support needs. Keep it warm, genuine, conversational, and LIMIT TO 35 WORDS OR LESS."
+                        "responseMessage": "A thoughtful response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges their loved one's readiness, shows understanding of the emotional complexity, provides reassurance about the process, then naturally asks about their priorities or support needs. Keep it warm, genuine, conversational, and LIMIT TO 35 WORDS OR LESS."
                     }
 
                     Make sure to return ONLY valid JSON, no additional text.`;
@@ -753,8 +782,13 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     elizaLogger.info(`Current user message: ${_message.content.text}`);
     elizaLogger.info(`===============================`);
     
+    // Get user name for potential personalization (randomly use name)  
+    const useName = shouldUseName();
+    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    
     // Get current user status for final analysis
     elizaLogger.info(`Current user status before final analysis: ${discoveryState.userStatus}`);
+    elizaLogger.info(`Using name in needs matching: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     
     // Combine all responses for comprehensive analysis
     const allUserResponses = [
@@ -770,16 +804,17 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     // Generate personalized needs matching response based on all user responses
     let finalResponse = "";
     try {
-        const prompt = `Current comprehensive user status: "${discoveryState.userStatus}"
+        const prompt = `User ${userName ? `(${userName}) ` : ''}comprehensive status: "${discoveryState.userStatus}"
                         All user responses throughout discovery: "${allUserResponses}"
 
                         Based on this understanding, generate a short, warm response that:
+                        ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response.` : ''}
                         1. Briefly acknowledges their loved one's main needs and personality
                         2. If they mentioned specific interests (reading, sewing, gardening, music, crafts, cooking, games, etc.), specifically mention how Grand Villa has those activities (book clubs, sewing circles, gardening groups, music programs, art classes, cooking activities, game nights, etc.)
                         3. Simply explains why Grand Villa feels like a good fit for their situation
                         4. Encourages them to visit to see it for themselves
 
-                        Keep it conversational, caring, and personal. LIMIT TO 60 WORDS OR LESS. Make it feel like you really listened to their specific situation.`;
+                        ${userName ? `Start the response with "${userName}," and then continue.` : ''} Keep it conversational, caring, and personal. LIMIT TO 60 WORDS OR LESS. Make it feel like you really listened to their specific situation.`;
         
         const personalizedResponse = await generateText({
             runtime: _runtime,
@@ -967,20 +1002,66 @@ async function moveToNextStage(_runtime: IAgentRuntime, _message: Memory, nextSt
     return "";
 }
 
+// Helper function to randomly decide whether to use user's name (feels more natural)
+function shouldUseName(): boolean {
+    return Math.random() < 0.5; // 50% chance to use name
+}
+
+// Helper function to get user's first name for personalization
+async function getUserFirstName(_runtime: IAgentRuntime, _message: Memory): Promise<string> {
+    const contactInfo = await getContactInfo(_runtime, _message);
+    
+    if (contactInfo?.name) {
+        const cleanName = contactInfo.name.trim();
+        if (cleanName) {
+            const firstName = cleanName.split(/\s+/)[0];
+            elizaLogger.info(`getUserFirstName - extracted firstName: "${firstName}"`);
+            return firstName;
+        }
+    }
+    
+    elizaLogger.info(`getUserFirstName - no name found, returning empty string`);
+    return "";
+}
+
 // Helper function to get stored contact information
 async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{name?: string, phone?: string} | null> {
+    let contactInfoArray: string[] = [];
+    
     try {
         const userResponses = await getUserResponses(_runtime, _message);
-        const contactInfoArray = userResponses.contact_info || [];
+        elizaLogger.info(`getContactInfo - userResponses: ${JSON.stringify(userResponses)}`);
+        
+        contactInfoArray = userResponses.contact_info || [];
+        elizaLogger.info(`getContactInfo - contactInfoArray length: ${contactInfoArray.length}`);
+        elizaLogger.info(`getContactInfo - contactInfoArray: ${JSON.stringify(contactInfoArray)}`);
         
         if (contactInfoArray.length > 0) {
             const latestContactInfo = contactInfoArray[contactInfoArray.length - 1];
-            const parsed = JSON.parse(latestContactInfo);
+            elizaLogger.info(`getContactInfo - latestContactInfo (raw): ${latestContactInfo}`);
+            
+            // Handle the messy format: "[Discovery Response] {"name":"Chris","phone":"..."}"
+            let cleanJsonString = latestContactInfo;
+            
+            // If it starts with "[Discovery Response]", extract the JSON part
+            if (typeof cleanJsonString === 'string' && cleanJsonString.includes('[Discovery Response]')) {
+                const jsonStart = cleanJsonString.indexOf('{');
+                if (jsonStart !== -1) {
+                    cleanJsonString = cleanJsonString.substring(jsonStart);
+                    elizaLogger.info(`getContactInfo - extracted JSON part: ${cleanJsonString}`);
+                }
+            }
+            
+            const parsed = JSON.parse(cleanJsonString);
+            elizaLogger.info(`getContactInfo - parsed: ${JSON.stringify(parsed)}`);
             elizaLogger.info(`Retrieved contact info: Name=${parsed.name}, Phone=${parsed.phone}`);
             return { name: parsed.name, phone: parsed.phone };
         }
+        
+        elizaLogger.info(`getContactInfo - no contact info found`);
     } catch (error) {
         elizaLogger.error("Error retrieving contact info:", error);
+        elizaLogger.error("Raw contact info that failed to parse:", contactInfoArray);
     }
     
     return null;

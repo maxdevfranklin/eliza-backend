@@ -144,6 +144,7 @@ export async function getUserResponses(runtime: IAgentRuntime, message: Memory) 
     );
     
     const userResponses: { [key: string]: string[] } = {
+        contact_info: [],
         situation: [],
         lifestyle: [],
         readiness: [],
