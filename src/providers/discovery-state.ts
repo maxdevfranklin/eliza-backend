@@ -8,6 +8,7 @@ const VALID_STAGES = [
     "priorities_discovery",
     "needs_matching",
     "info_sharing",
+    "schedule_visit",
     "visit_transition"
 ] as const;
 

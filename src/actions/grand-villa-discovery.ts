@@ -156,6 +156,9 @@ export const grandVillaDiscoveryAction: Action = {
                     case "visit_transition":
                         response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState);
                         break;
+                    case "schedule_visit":
+                        response_text = await handleScheduleVisit(_runtime, _message, _state, discoveryState);
+                        break;
                     default:
                         response_text = await handleGeneralInquiry(_runtime, _message, _state);
                 }
@@ -780,14 +783,12 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     elizaLogger.info(`  💭 Readiness Responses (${readinessResponses.length}): ${JSON.stringify(readinessResponses, null, 2)}`);
     elizaLogger.info(`  ⭐ Priority Responses (${prioritiesResponses.length}): ${JSON.stringify(prioritiesResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
     elizaLogger.info(`===============================`);
     
     // Get user name for potential personalization (randomly use name)  
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
-    
-    // Get current user status for final analysis
-    elizaLogger.info(`Current user status before final analysis: ${discoveryState.userStatus}`);
     elizaLogger.info(`Using name in needs matching: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     
     // Combine all responses for comprehensive analysis
@@ -798,39 +799,83 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         ...prioritiesResponses
     ].join(" ");
     
-    const finalStatusUpdate = `Complete discovery phase finished. Current status: ${discoveryState.userStatus}. All responses: ${allUserResponses}. Ready for needs matching and Grand Villa recommendations.`;
-    await updateUserStatus(_runtime, _message, finalStatusUpdate);
-    
-    // Generate personalized needs matching response based on all user responses
+    // Analyze user response and update status using AI (like other stages)
+    const context = `Current user status: "${discoveryState.userStatus}"
+                    User ${userName ? `(${userName}) ` : ''}latest response about their priorities: "${_message.content.text}"
+                    All user responses throughout discovery: "${allUserResponses}"
+
+                    Please analyze this information and provide TWO things in JSON format:
+                    1. A comprehensive final status report about the user's complete situation, needs, interests, priorities, and what they want, incorporating all discovery information
+                    2. A warm, personalized response that matches their needs to Grand Villa's offerings
+
+                    Return your response in this exact JSON format:
+                    {
+                        "updatedUserStatus": "Comprehensive final analysis of user's complete situation, family needs, interests, priorities, readiness level, and what they're looking for in senior living, incorporating all discovery information",
+                        "responseMessage": "A warm response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges their priorities, matches their loved one's interests to specific Grand Villa activities (book clubs, sewing circles, gardening groups, music programs, etc.), explains why Grand Villa fits their situation, and encourages a visit. Keep it personal, caring, conversational, and LIMIT TO 60 WORDS OR LESS."
+                    }
+
+                    Make sure to return ONLY valid JSON, no additional text.`;
+
+    let updatedUserStatus = "";
     let finalResponse = "";
+    
     try {
-        const prompt = `User ${userName ? `(${userName}) ` : ''}comprehensive status: "${discoveryState.userStatus}"
-                        All user responses throughout discovery: "${allUserResponses}"
-
-                        Based on this understanding, generate a short, warm response that:
-                        ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response.` : ''}
-                        1. Briefly acknowledges their loved one's main needs and personality
-                        2. If they mentioned specific interests (reading, sewing, gardening, music, crafts, cooking, games, etc.), specifically mention how Grand Villa has those activities (book clubs, sewing circles, gardening groups, music programs, art classes, cooking activities, game nights, etc.)
-                        3. Simply explains why Grand Villa feels like a good fit for their situation
-                        4. Encourages them to visit to see it for themselves
-
-                        ${userName ? `Start the response with "${userName}," and then continue.` : ''} Keep it conversational, caring, and personal. LIMIT TO 60 WORDS OR LESS. Make it feel like you really listened to their specific situation.`;
-        
-        const personalizedResponse = await generateText({
+        const aiResponse = await generateText({
             runtime: _runtime,
-            context: prompt,
+            context: context,
             modelClass: ModelClass.SMALL
         });
+
+        const parsed = JSON.parse(aiResponse);
+        updatedUserStatus = parsed.updatedUserStatus || "";
+        finalResponse = parsed.responseMessage || "";
         
-        if (personalizedResponse) {
-            elizaLogger.info(`Generated personalized needs matching response: ${personalizedResponse}`);
-            finalResponse = personalizedResponse;
-        }
+        // Log the extracted information
+        elizaLogger.info(`=== UPDATED USER STATUS ===`);
+        elizaLogger.info(updatedUserStatus);
+        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
+        elizaLogger.info(finalResponse);
+        elizaLogger.info(`===========================`);
+        
+        // Save the updated user status
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        
     } catch (error) {
-        elizaLogger.error(`Error generating personalized needs matching response: ${error}`);
+        elizaLogger.error("Failed to parse JSON response:", error);
+        // Fallback to comprehensive status update
+        updatedUserStatus = `Complete discovery phase finished. Current status: ${discoveryState.userStatus}. All responses: ${allUserResponses}. Ready for needs matching and Grand Villa recommendations.`;
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        
+        // Generate fallback response
+        try {
+            const fallbackPrompt = `User ${userName ? `(${userName}) ` : ''}comprehensive status: "${discoveryState.userStatus}"
+                                   All user responses throughout discovery: "${allUserResponses}"
+
+                                   Based on this understanding, generate a short, warm response that:
+                                   ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response.` : ''}
+                                   1. Briefly acknowledges their loved one's main needs and personality
+                                   2. If they mentioned specific interests (reading, sewing, gardening, music, crafts, cooking, games, etc.), specifically mention how Grand Villa has those activities (book clubs, sewing circles, gardening groups, music programs, art classes, cooking activities, game nights, etc.)
+                                   3. Simply explains why Grand Villa feels like a good fit for their situation
+                                   4. Encourages them to visit to see it for themselves
+
+                                   ${userName ? `Start the response with "${userName}," and then continue.` : ''} Keep it conversational, caring, and personal. LIMIT TO 60 WORDS OR LESS. Make it feel like you really listened to their specific situation.`;
+            
+            const personalizedResponse = await generateText({
+                runtime: _runtime,
+                context: fallbackPrompt,
+                modelClass: ModelClass.SMALL
+            });
+            
+            if (personalizedResponse) {
+                elizaLogger.info(`Generated fallback personalized needs matching response: ${personalizedResponse}`);
+                finalResponse = personalizedResponse;
+            }
+        } catch (fallbackError) {
+            elizaLogger.error(`Error generating fallback needs matching response: ${fallbackError}`);
+        }
     }
 
-    // Fallback to default response if generation fails
+    // Ultimate fallback to default response if all generation fails
     if (!finalResponse) {
         finalResponse = `I can see how much you care about finding the right place. Grand Villa has wonderful activities like book clubs, sewing circles, gardening groups, and music programs. The staff really focus on making residents feel at home. Would you like to visit so you can see what daily life would feel like?`;
     }
@@ -859,59 +904,89 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
         await saveUserResponse(_runtime, _message, "info_sharing", _message.content.text);
     }
     
+    // Get user name for potential personalization (randomly use name)
+    const useName = shouldUseName();
+    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    
     // Show previous user responses collected so far
     const previousResponses = await getUserResponses(_runtime, _message);
     elizaLogger.info(`=== INFO SHARING STAGE ===`);
     elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
     elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
+    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     elizaLogger.info(`==============================`)
     
-    // Generate response using AI with Grand Villa information as context
-    const context = `User asked: "${_message.content.text}"
-                    Current user status: "${discoveryState.userStatus}"
-                    
-                    Grand Villa Information:
-                    Grand Villa has locations in Florida, California, and Colorado.
-                    They offer Independent Living, Assisted Living, Memory Care, and Respite Care.
-                    Facilities include dining, medication management, housekeeping, laundry, fitness centers, gardens, walking trails, salon, barber, transportation, and activity programs.
-                    Rooms are private or companion style with kitchenettes, cable TV, and Wi-Fi.
-                    Staff is available 24 hours with emergency call systems.
-                    
-                    Pricing examples:
-                    Sarasota, FL: contact for rates.
-                    Escondido, CA: starts at $4,800 per month.
-                    Grand Junction, CO: $4,587 to $5,963 per month.
-                    Ormond Beach, FL: $3,195 to $4,095 per month.
-                    New Port Richey, FL: studios from $3,095, one-bedrooms from $3,695.
-                    
-                    Activities include book clubs, sewing circles, gardening groups, music programs, art classes, cooking activities, game nights, yoga, bingo, painting, wellness programs, and outings.
-                    They provide medication delivery, technology-enabled care tracking, and hurricane preparedness in Florida locations.
-                    Their environment is family-friendly and looks like a home with a resort-style feel.
-                    They have flexible monthly rates covering most services.
-                    They also offer senior day programs and short-term stays for respite care.
-                    
-                    Please provide a helpful, warm response that answers the user's question using the Grand Villa information above. If they ask about activities, mention specific ones that match interests mentioned earlier in the conversation. Keep it short, simple and clear - LIMIT TO 40 WORDS OR LESS. Make it personal and caring.`;
-    
+    // Analyze user response and update status using AI (like earlier stages)
+    const statusContext = `Current user status: "${discoveryState.userStatus}"
+                          User ${userName ? `(${userName}) ` : ''}latest response about Grand Villa: "${_message.content.text}"
+
+                          Please analyze this information and provide TWO things in JSON format:
+                          1. An updated comprehensive status report about the user's situation, needs, interests, and what they want, building on the previous status
+                          2. A helpful response that answers their question about Grand Villa and then naturally asks if they'd like to schedule a visit
+
+                          Grand Villa Information to use in your response:
+                          Grand Villa has locations in Florida, California, and Colorado.
+                          They offer Independent Living, Assisted Living, Memory Care, and Respite Care.
+                          Facilities include dining, medication management, housekeeping, laundry, fitness centers, gardens, walking trails, salon, barber, transportation, and activity programs.
+                          Rooms are private or companion style with kitchenettes, cable TV, and Wi-Fi.
+                          Staff is available 24 hours with emergency call systems.
+                          
+                          Pricing examples:
+                          Sarasota, FL: contact for rates.
+                          Escondido, CA: starts at $4,800 per month.
+                          Grand Junction, CO: $4,587 to $5,963 per month.
+                          Ormond Beach, FL: $3,195 to $4,095 per month.
+                          New Port Richey, FL: studios from $3,095, one-bedrooms from $3,695.
+                          
+                          Activities include book clubs, sewing circles, gardening groups, music programs, art classes, cooking activities, game nights, yoga, bingo, painting, wellness programs, and outings.
+
+                          Return your response in this exact JSON format:
+                          {
+                              "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, interests, and what they want, incorporating the new information they asked about",
+                              "responseMessage": "A helpful response that ${userName ? `starts with '${userName},' and then ` : ''}answers their question about Grand Villa, then naturally transitions to asking if they'd like to schedule a visit to see it firsthand. Keep it warm, informative, conversational, and LIMIT TO 50 WORDS OR LESS."
+                          }
+
+                          Make sure to return ONLY valid JSON, no additional text.`;
+
+    let updatedUserStatus = "";
     let response = "";
+    
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
-            context: context,
+            context: statusContext,
             modelClass: ModelClass.SMALL
         });
+
+        const parsed = JSON.parse(aiResponse);
+        updatedUserStatus = parsed.updatedUserStatus || "";
+        response = parsed.responseMessage || "";
         
-        response = aiResponse || "I'd be happy to help you learn more about Grand Villa. What would you like to know?";
+        // Log the extracted information
+        elizaLogger.info(`=== UPDATED USER STATUS ===`);
+        elizaLogger.info(updatedUserStatus);
+        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
+        elizaLogger.info(response);
+        elizaLogger.info(`===========================`);
+        
+        // Save the updated user status
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        
     } catch (error) {
-        elizaLogger.error("Error generating AI response for info sharing:", error);
-        response = "I'd be happy to help you learn more about Grand Villa. What would you like to know?";
+        elizaLogger.error("Failed to parse JSON response:", error);
+        // Fallback response that asks to schedule a visit
+        response = `I'd be happy to help you learn more about Grand Villa. ${userName ? `${userName}, ` : ''}would you like to schedule a visit so you can see the community and what daily life would feel like firsthand?`;
+        updatedUserStatus = `${discoveryState.userStatus} | Info sharing: Asked about ${_message.content.text}`;
+        await updateUserStatus(_runtime, _message, updatedUserStatus);
+    }
+
+    // Fallback if response is empty
+    if (!response) {
+        response = `I'd be happy to help you learn more about Grand Villa. ${userName ? `${userName}, ` : ''}would you like to schedule a visit so you can see the community and what daily life would feel like firsthand?`;
     }
     
-    // Update user status with the information shared
-    const updatedStatus = `${discoveryState.userStatus} | Asked about: ${_message.content.text}`;
-    await updateUserStatus(_runtime, _message, updatedStatus);
-    
-    // Store the response in memory with stage transition to visit_transition
+    // Store the response in memory with stage transition to schedule_visit
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
@@ -920,7 +995,7 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
             text: response,
             metadata: { 
                 askedQuestion: response,
-                stage: "info_sharing"
+                stage: "schedule_visit"
             }
         }
     });
@@ -931,6 +1006,216 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
 // Visit Transition Handler
 async function handleVisitTransition(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     return "It sounds like your family member could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like.\n\nWould Wednesday afternoon or Friday morning work better for you?";
+}
+
+// Schedule Visit Handler
+async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    elizaLogger.info("Handling schedule visit stage");
+    
+    // Check if user provided a response (not the first interaction)
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        // Get all user responses from schedule_visit stage so far
+        let scheduleVisitResponses = await getUserAnswersFromStage(_runtime, _message, "schedule_visit");
+        
+        // Fallback: if stage-based approach returns empty, get recent user messages
+        if (scheduleVisitResponses.length === 0) {
+            elizaLogger.info("Stage-based approach returned empty, using fallback to get recent user messages");
+            const allMemories = await _runtime.messageManager.getMemories({
+                roomId: _message.roomId,
+                count: 20
+            });
+            
+            scheduleVisitResponses = allMemories
+                .filter(mem => mem.userId !== _message.agentId && mem.content.text.trim())
+                .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
+                .slice(-5) // Get last 5 user messages
+                .map(mem => mem.content.text);
+            
+            elizaLogger.info(`Fallback collected ${scheduleVisitResponses.length} recent user messages`);
+        }
+        
+        const allScheduleVisitText = scheduleVisitResponses.join(" ");
+        
+        elizaLogger.info(`=== SCHEDULE VISIT RESPONSES ===`);
+        elizaLogger.info(`All schedule visit responses: ${JSON.stringify(scheduleVisitResponses)}`);
+        elizaLogger.info(`Combined text: ${allScheduleVisitText}`);
+        elizaLogger.info(`===============================`);
+        
+        // Check if we already have any visit info stored
+        let existingVisitInfo = await getVisitInfo(_runtime, _message);
+        
+        // Try to extract email, mailing address, and preferred contact method from ALL responses
+        const extractionContext = `Please extract the user's email, mailing address, and preferred contact method from these responses: "${allScheduleVisitText}"
+
+            Look for:
+            - Email address (any format: user@domain.com, user@domain.org, etc.)
+            - Mailing address (street address, city, state, zip code - can be partial)
+            - Preferred contact method (phone, email, or any indication of preference)
+            
+            ${existingVisitInfo ? `Note: We may already have some info - Email: ${existingVisitInfo.email || 'none'}, Address: ${existingVisitInfo.mailingAddress || 'none'}, Preferred Contact: ${existingVisitInfo.preferredContact || 'none'}` : ''}
+            
+            Return your response in this exact JSON format:
+            {
+                "email": "extracted email address or null if not found",
+                "mailingAddress": "extracted mailing address or null if not found", 
+                "preferredContact": "phone or email based on user preference, or null if not found",
+                "foundEmail": true/false,
+                "foundAddress": true/false,
+                "foundPreference": true/false
+            }
+            
+            Make sure to return ONLY valid JSON, no additional text.`;
+
+        try {
+            const aiResponse = await generateText({
+                runtime: _runtime,
+                context: extractionContext,
+                modelClass: ModelClass.SMALL
+            });
+
+            const parsed = JSON.parse(aiResponse);
+            
+            // Merge with existing info if we have any
+            let finalEmail = parsed.foundEmail && parsed.email ? parsed.email : (existingVisitInfo?.email || null);
+            let finalAddress = parsed.foundAddress && parsed.mailingAddress ? parsed.mailingAddress : (existingVisitInfo?.mailingAddress || null);
+            let finalPreference = parsed.foundPreference && parsed.preferredContact ? parsed.preferredContact : (existingVisitInfo?.preferredContact || null);
+            
+            elizaLogger.info(`=== VISIT INFO EXTRACTION ===`);
+            elizaLogger.info(`Extracted email: ${parsed.foundEmail ? parsed.email : 'NO'}`);
+            elizaLogger.info(`Extracted address: ${parsed.foundAddress ? parsed.mailingAddress : 'NO'}`);
+            elizaLogger.info(`Extracted preference: ${parsed.foundPreference ? parsed.preferredContact : 'NO'}`);
+            elizaLogger.info(`Final email: ${finalEmail || 'NO'}`);
+            elizaLogger.info(`Final address: ${finalAddress || 'NO'}`);
+            elizaLogger.info(`Final preference: ${finalPreference || 'NO'}`);
+            elizaLogger.info(`============================`);
+
+            // If we found all required info, save them and proceed
+            if (finalEmail && finalAddress && finalPreference) {
+                const visitInfo = {
+                    email: finalEmail,
+                    mailingAddress: finalAddress,
+                    preferredContact: finalPreference,
+                    collectedAt: new Date().toISOString()
+                };
+                
+                elizaLogger.info(`=== SAVING VISIT INFO ===`);
+                elizaLogger.info(`visitInfo object: ${JSON.stringify(visitInfo)}`);
+                
+                // Save visit information (overwrite any previous partial info)
+                await saveUserResponse(_runtime, _message, "visit_info", JSON.stringify(visitInfo));
+                elizaLogger.info(`Visit info saved to visit_info category`);
+                
+                // Update user status with visit information
+                const statusUpdate = `Visit info collected - Email: ${finalEmail}, Address: ${finalAddress}, Preferred Contact: ${finalPreference}`;
+                await updateUserStatus(_runtime, _message, statusUpdate);
+                
+                // Get user name for personalized response
+                const userName = await getUserFirstName(_runtime, _message);
+                
+                // Complete visit scheduling with personalized response
+                const response = `Perfect${userName ? `, ${userName}` : ''}! I have all the information I need. I'll send you a confirmation and directions to your ${finalPreference === 'email' ? 'email' : 'phone'}. Our team will also follow up to make sure you have everything you need for your visit. We're excited to welcome you and show you what makes Grand Villa special!`;
+                
+                await _runtime.messageManager.createMemory({
+                    roomId: _message.roomId,
+                    userId: _message.userId,
+                    agentId: _message.agentId,
+                    content: { 
+                        text: response,
+                        metadata: {
+                            stage: "visit_scheduled"
+                        }
+                    }
+                });
+                
+                elizaLogger.info(`Stored complete visit info and moving to visit_scheduled`);
+                return response;
+            }
+            
+            // Save partial visit info if we have new information
+            if (finalEmail || finalAddress || finalPreference) {
+                const partialVisitInfo = {
+                    email: finalEmail,
+                    mailingAddress: finalAddress,
+                    preferredContact: finalPreference,
+                    collectedAt: new Date().toISOString()
+                };
+                
+                elizaLogger.info(`=== SAVING PARTIAL VISIT INFO ===`);
+                elizaLogger.info(`partialVisitInfo object: ${JSON.stringify(partialVisitInfo)}`);
+                
+                await saveUserResponse(_runtime, _message, "visit_info", JSON.stringify(partialVisitInfo));
+                elizaLogger.info(`Partial visit info saved to visit_info category`);
+            }
+            
+            // If we're missing information, ask for what's missing
+            let missingInfoResponse = "";
+            const missing = [];
+            if (!finalEmail) missing.push("email address");
+            if (!finalAddress) missing.push("mailing address");
+            if (!finalPreference) missing.push("preferred contact method");
+            
+            if (missing.length === 3) {
+                missingInfoResponse = "Perfect! To complete your visit scheduling, I'll need your email address, mailing address, and whether you prefer to be contacted by phone or email. Could you share those with me?";
+            } else if (missing.length === 2) {
+                missingInfoResponse = `Great! I just need your ${missing.join(" and ")} to complete the scheduling. Could you provide those for me?`;
+            } else if (missing.length === 1) {
+                missingInfoResponse = `Almost there! I just need your ${missing[0]} to finish setting up your visit. Could you share that with me?`;
+            }
+            
+            // Stay in schedule_visit stage
+            await _runtime.messageManager.createMemory({
+                roomId: _message.roomId,
+                userId: _message.userId,
+                agentId: _message.agentId,
+                content: { 
+                    text: missingInfoResponse,
+                    metadata: {
+                        stage: "schedule_visit"
+                    }
+                }
+            });
+            
+            return missingInfoResponse;
+            
+        } catch (error) {
+            elizaLogger.error("Error extracting visit info:", error);
+            // Fallback to asking for visit info
+            const fallbackResponse = "Perfect! To complete your visit scheduling, I'll need your email address, mailing address, and whether you prefer to be contacted by phone or email. Could you share those with me?";
+            
+            await _runtime.messageManager.createMemory({
+                roomId: _message.roomId,
+                userId: _message.userId,
+                agentId: _message.agentId,
+                content: { 
+                    text: fallbackResponse,
+                    metadata: {
+                        stage: "schedule_visit"
+                    }
+                }
+            });
+            
+            return fallbackResponse;
+        }
+    }
+    
+    // First interaction in schedule_visit stage - natural transition from info_sharing
+    const userName = await getUserFirstName(_runtime, _message);
+    const initialResponse = `That's wonderful${userName ? `, ${userName}` : ''}! I can see Grand Villa would be a great fit for your family. Let's get your visit scheduled so you can experience it firsthand. I'll need your email address, mailing address, and whether you prefer to be contacted by phone or email to send you confirmation and directions.`;
+    
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: { 
+            text: initialResponse,
+            metadata: {
+                stage: "schedule_visit"
+            }
+        }
+    });
+    
+    elizaLogger.info(`Stored initial visit scheduling request in schedule_visit stage`);
+    return initialResponse;
 }
 
 // State Management Functions
@@ -975,6 +1260,18 @@ async function updateDiscoveryState(_runtime: IAgentRuntime, _message: Memory, s
 
 async function determineConversationStage(_runtime: IAgentRuntime, _message: Memory, discoveryState: any): Promise<string> {
     elizaLogger.info(`Determining conversation stage with state: ${JSON.stringify(discoveryState)}`);
+    
+    // Get the last agent message to see what stage was set
+    const lastAgentMessage = await getLastAgentMessage(_runtime, _message);
+    const lastStage = lastAgentMessage?.content?.metadata ? (lastAgentMessage.content.metadata as { stage?: string }).stage : undefined;
+    
+    elizaLogger.info(`Last agent message stage: ${lastStage}`);
+    
+    // If we have a stage from the last agent message, use that
+    if (lastStage) {
+        elizaLogger.info(`Using stage from last agent message: ${lastStage}`);
+        return lastStage;
+    }
     
     // If no state exists, start with trust building
     if (!discoveryState) {
@@ -1065,6 +1362,64 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
     }
     
     return null;
+}
+
+// Helper function to get stored visit information
+async function getVisitInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{email?: string, mailingAddress?: string, preferredContact?: string} | null> {
+    let visitInfoArray: string[] = [];
+    
+    try {
+        const userResponses = await getUserResponses(_runtime, _message);
+        elizaLogger.info(`getVisitInfo - userResponses: ${JSON.stringify(userResponses)}`);
+        
+        visitInfoArray = userResponses.visit_info || [];
+        elizaLogger.info(`getVisitInfo - visitInfoArray length: ${visitInfoArray.length}`);
+        elizaLogger.info(`getVisitInfo - visitInfoArray: ${JSON.stringify(visitInfoArray)}`);
+        
+        if (visitInfoArray.length > 0) {
+            const latestVisitInfo = visitInfoArray[visitInfoArray.length - 1];
+            elizaLogger.info(`getVisitInfo - latestVisitInfo (raw): ${latestVisitInfo}`);
+            
+            // Handle the messy format: "[Discovery Response] {"email":"...","mailingAddress":"...","preferredContact":"..."}"
+            let cleanJsonString = latestVisitInfo;
+            
+            // If it starts with "[Discovery Response]", extract the JSON part
+            if (typeof cleanJsonString === 'string' && cleanJsonString.includes('[Discovery Response]')) {
+                const jsonStart = cleanJsonString.indexOf('{');
+                if (jsonStart !== -1) {
+                    cleanJsonString = cleanJsonString.substring(jsonStart);
+                    elizaLogger.info(`getVisitInfo - extracted JSON part: ${cleanJsonString}`);
+                }
+            }
+            
+            const parsed = JSON.parse(cleanJsonString);
+            elizaLogger.info(`getVisitInfo - parsed: ${JSON.stringify(parsed)}`);
+            elizaLogger.info(`Retrieved visit info: Email=${parsed.email}, Address=${parsed.mailingAddress}, Preferred Contact=${parsed.preferredContact}`);
+            return { email: parsed.email, mailingAddress: parsed.mailingAddress, preferredContact: parsed.preferredContact };
+        }
+        
+        elizaLogger.info(`getVisitInfo - no visit info found`);
+    } catch (error) {
+        elizaLogger.error("Error retrieving visit info:", error);
+        elizaLogger.error("Raw visit info that failed to parse:", visitInfoArray);
+    }
+    
+    return null;
+}
+
+// Helper function to get the last agent message
+async function getLastAgentMessage(_runtime: IAgentRuntime, _message: Memory): Promise<Memory | null> {
+    const allMemories = await _runtime.messageManager.getMemories({
+        roomId: _message.roomId,
+        count: 10
+    });
+    
+    // Find the most recent agent message
+    const agentMessages = allMemories
+        .filter(mem => mem.userId === _message.agentId)
+        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    
+    return agentMessages.length > 0 ? agentMessages[0] : null;
 }
 
 // Helper function to get user answers from a specific stage
