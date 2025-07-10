@@ -724,7 +724,9 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     
     try {
         const parsed = JSON.parse(aiResponse);
-        updatedUserStatus = parsed.updatedUserStatus || "";
+        // 🔧 Fix: Convert object to string if needed
+        const rawStatus = parsed.updatedUserStatus || "";
+        updatedUserStatus = typeof rawStatus === 'object' ? JSON.stringify(rawStatus) : rawStatus;
         answer = parsed.responseMessage || "";
         
         // Log the extracted information
