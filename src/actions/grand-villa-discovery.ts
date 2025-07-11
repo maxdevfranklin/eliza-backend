@@ -452,7 +452,9 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     
     try {
         const parsed = JSON.parse(aiResponse);
-        userReport = parsed.userReport || "";
+        // 🔧 Fix: Convert object to string if needed
+        const rawReport = parsed.userReport || "";
+        userReport = typeof rawReport === 'object' ? JSON.stringify(rawReport) : rawReport;
         answer = parsed.responseMessage || "";
         
         // Log the extracted information
@@ -542,7 +544,9 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     
     try {
         const parsed = JSON.parse(aiResponse);
-        updatedUserStatus = parsed.updatedUserStatus || "";
+        // 🔧 Fix: Convert object to string if needed
+        const rawStatus = parsed.updatedUserStatus || "";
+        updatedUserStatus = typeof rawStatus === 'object' ? JSON.stringify(rawStatus) : rawStatus;
         answer = parsed.responseMessage || "";
         
         // Log the extracted information
@@ -829,7 +833,9 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         });
 
         const parsed = JSON.parse(aiResponse);
-        updatedUserStatus = parsed.updatedUserStatus || "";
+        // 🔧 Fix: Convert object to string if needed
+        const rawStatus = parsed.updatedUserStatus || "";
+        updatedUserStatus = typeof rawStatus === 'object' ? JSON.stringify(rawStatus) : rawStatus;
         finalResponse = parsed.responseMessage || "";
         
         // Log the extracted information
@@ -962,7 +968,9 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
         });
 
         const parsed = JSON.parse(aiResponse);
-        updatedUserStatus = parsed.updatedUserStatus || "";
+        // 🔧 Fix: Convert object to string if needed
+        const rawStatus = parsed.updatedUserStatus || "";
+        updatedUserStatus = typeof rawStatus === 'object' ? JSON.stringify(rawStatus) : rawStatus;
         response = parsed.responseMessage || "";
         
         // Log the extracted information
