@@ -216,20 +216,20 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
         // Get all user responses from trust building stage so far
         let trustBuildingResponses = await getUserAnswersFromStage(_runtime, _message, "trust_building");
         
-        // Fallback: if stage-based approach returns empty, get all user messages in conversation
+        // Fallback: if stage-based approach returns empty, get ONLY current user's messages
         if (trustBuildingResponses.length === 0) {
-            elizaLogger.info("Stage-based approach returned empty, using fallback to get all user messages");
+            elizaLogger.info("Stage-based approach returned empty, using fallback to get current user's messages");
             const allMemories = await _runtime.messageManager.getMemories({
                 roomId: _message.roomId,
                 count: 50
             });
             
             trustBuildingResponses = allMemories
-                .filter(mem => mem.userId !== _message.agentId && mem.content.text.trim())
+                .filter(mem => mem.userId === _message.userId && mem.userId !== _message.agentId && mem.content.text.trim())
                 .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
                 .map(mem => mem.content.text);
             
-            elizaLogger.info(`Fallback collected ${trustBuildingResponses.length} user messages`);
+            elizaLogger.info(`🔒 USER ISOLATION: Fallback collected ${trustBuildingResponses.length} messages from user ${_message.userId} only`);
         }
         
         const allTrustBuildingText = trustBuildingResponses.join(" ");
@@ -1027,21 +1027,21 @@ async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _s
         // Get all user responses from schedule_visit stage so far
         let scheduleVisitResponses = await getUserAnswersFromStage(_runtime, _message, "schedule_visit");
         
-        // Fallback: if stage-based approach returns empty, get recent user messages
+        // Fallback: if stage-based approach returns empty, get recent messages from ONLY current user
         if (scheduleVisitResponses.length === 0) {
-            elizaLogger.info("Stage-based approach returned empty, using fallback to get recent user messages");
+            elizaLogger.info("Stage-based approach returned empty, using fallback to get current user's messages");
             const allMemories = await _runtime.messageManager.getMemories({
                 roomId: _message.roomId,
                 count: 20
             });
             
             scheduleVisitResponses = allMemories
-                .filter(mem => mem.userId !== _message.agentId && mem.content.text.trim())
+                .filter(mem => mem.userId === _message.userId && mem.userId !== _message.agentId && mem.content.text.trim())
                 .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
                 .slice(-5) // Get last 5 user messages
                 .map(mem => mem.content.text);
             
-            elizaLogger.info(`Fallback collected ${scheduleVisitResponses.length} recent user messages`);
+            elizaLogger.info(`🔒 USER ISOLATION: Fallback collected ${scheduleVisitResponses.length} messages from user ${_message.userId} only`);
         }
         
         const allScheduleVisitText = scheduleVisitResponses.join(" ");
@@ -1487,13 +1487,13 @@ async function getUserAnswersFromStage(_runtime: IAgentRuntime, _message: Memory
         elizaLogger.info(`Stage ${stage} continues to end of conversation`);
     }
     
-    // Collect user messages within the stage boundaries
+    // Collect user messages within the stage boundaries (ONLY from current user)
     if (stageStartIndex !== -1) {
         for (let i = stageStartIndex + 1; i < stageEndIndex; i++) {
             const memory = sortedMemories[i];
-            if (memory.userId !== _message.agentId) {
+            if (memory.userId === _message.userId && memory.userId !== _message.agentId) {
                 userAnswers.push(memory.content.text);
-                elizaLogger.info(`Collected user answer in ${stage}: ${memory.content.text}`);
+                elizaLogger.info(`🔒 Collected user answer in ${stage} from user ${_message.userId}: ${memory.content.text}`);
             }
         }
     } else {
