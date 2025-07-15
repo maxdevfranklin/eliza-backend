@@ -1,6 +1,21 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
 import { discoveryStateProvider, saveUserResponse, getUserResponses, updateUserStatus } from "../providers/discovery-state.js";
 
+// Define the Q&A structure we want to collect
+interface QAEntry {
+    question: string;
+    answer: string;
+    stage: string;
+    timestamp: string;
+}
+
+interface ComprehensiveQA {
+    name?: string;
+    phone?: string;
+    qaEntries: QAEntry[];
+    contactCollectedAt?: string;
+}
+
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
     description: "Universal handler that responds to every user message, regardless of content, intent, or topic. Always triggers to ensure no user input goes unhandled.",
@@ -115,7 +130,7 @@ export const grandVillaDiscoveryAction: Action = {
                 currentResponses = await getUserResponses(_runtime, _message);
             } catch (error) {
                 elizaLogger.warn("Using empty user responses:", error);
-                currentResponses = { situation: [], lifestyle: [], readiness: [], priorities: [] };
+                currentResponses = { situation: [], lifestyle: [], readiness: [], priorities: [], qa_entry: [] };
             }
             
             // Determine conversation stage with safe fallback
@@ -205,6 +220,74 @@ export const grandVillaDiscoveryAction: Action = {
             return true; // Always return true even in ultimate fallback
         }
     }
+}
+
+// Helper function to save Q&A entry
+async function saveQAEntry(_runtime: IAgentRuntime, _message: Memory, question: string, answer: string, stage: string): Promise<void> {
+    const qaEntry: QAEntry = {
+        question: question,
+        answer: answer,
+        stage: stage,
+        timestamp: new Date().toISOString()
+    };
+    
+    elizaLogger.info(`=== SAVING Q&A ENTRY ===`);
+    elizaLogger.info(`Question: ${question}`);
+    elizaLogger.info(`Answer: ${answer}`);
+    elizaLogger.info(`Stage: ${stage}`);
+    elizaLogger.info(`========================`);
+    
+    // Save the Q&A entry
+    await saveUserResponse(_runtime, _message, "qa_entry", JSON.stringify(qaEntry));
+}
+
+// Helper function to get all Q&A entries
+async function getAllQAEntries(_runtime: IAgentRuntime, _message: Memory): Promise<QAEntry[]> {
+    try {
+        const userResponses = await getUserResponses(_runtime, _message);
+        const qaEntries: QAEntry[] = [];
+        
+        if (userResponses.qa_entry && userResponses.qa_entry.length > 0) {
+            for (const entryString of userResponses.qa_entry) {
+                try {
+                    const entry = JSON.parse(entryString);
+                    qaEntries.push(entry);
+                } catch (error) {
+                    elizaLogger.error("Error parsing Q&A entry:", error);
+                }
+            }
+        }
+        
+        return qaEntries.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    } catch (error) {
+        elizaLogger.error("Error retrieving Q&A entries:", error);
+        return [];
+    }
+}
+
+// Helper function to display Q&A summary
+async function displayQASummary(_runtime: IAgentRuntime, _message: Memory): Promise<void> {
+    const qaEntries = await getAllQAEntries(_runtime, _message);
+    const contactInfo = await getContactInfo(_runtime, _message);
+    
+    elizaLogger.info(`=== COMPREHENSIVE Q&A SUMMARY ===`);
+    if (contactInfo?.name) {
+        elizaLogger.info(`👤 Name: ${contactInfo.name}`);
+    }
+    if (contactInfo?.phone) {
+        elizaLogger.info(`📞 Phone: ${contactInfo.phone}`);
+    }
+    elizaLogger.info(`📝 Total Q&A Entries: ${qaEntries.length}`);
+    elizaLogger.info(`==================================`);
+    
+    qaEntries.forEach((entry, index) => {
+        elizaLogger.info(`\n${index + 1}. [${entry.stage.toUpperCase()}]`);
+        elizaLogger.info(`   Q: ${entry.question}`);
+        elizaLogger.info(`   A: ${entry.answer}`);
+        elizaLogger.info(`   Time: ${entry.timestamp}`);
+    });
+    
+    elizaLogger.info(`==================================`);
 }
 
 // Trust Building Handler
@@ -297,9 +380,8 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
                 await saveUserResponse(_runtime, _message, "contact_info", JSON.stringify(contactInfo));
                 elizaLogger.info(`Contact info saved to contact_info category`);
                 
-                // Update user status with contact information
-                const statusUpdate = `Contact collected - Name: ${finalName}, Phone: ${finalPhone}`;
-                await updateUserStatus(_runtime, _message, statusUpdate);
+                // Initialize Q&A collection with contact info
+                await saveQAEntry(_runtime, _message, "What is your name and phone number?", `Name: ${finalName}, Phone: ${finalPhone}`, "trust_building");
                 
                 // Move to next stage with personalized response
                 const response = `Thank you, ${finalName}! I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.`;
@@ -464,15 +546,15 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         elizaLogger.info(answer);
         elizaLogger.info(`=============================`);
         
-        // Save the user status report
-        await updateUserStatus(_runtime, _message, userReport);
+        // Save the Q&A entry for the situation discovery
+        await saveQAEntry(_runtime, _message, "What made you decide to call us today?", _message.content.text, "situation_discovery");
         
     } catch (error) {
         elizaLogger.error("Failed to parse JSON response:", error);
         // Fallback to using the entire response as the answer
         answer = aiResponse;
-        userReport = `Unable to parse user status from response: ${_message.content.text}`;
-        await updateUserStatus(_runtime, _message, userReport);
+        // Save the Q&A entry even if parsing failed
+        await saveQAEntry(_runtime, _message, "What made you decide to call us today?", _message.content.text, "situation_discovery");
     }
 
     // Store the asked question in memory with stage transition
@@ -556,15 +638,15 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         elizaLogger.info(answer);
         elizaLogger.info(`===========================`);
         
-        // Save the updated user status
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Save the Q&A entry - this often captures concerns too
+        await saveQAEntry(_runtime, _message, "What's your greatest concern at this time about your loved one's daily life?", _message.content.text, "lifestyle_discovery");
         
     } catch (error) {
         elizaLogger.error("Failed to parse JSON response:", error);
         // Fallback to using the entire response as the answer
         answer = aiResponse;
-        updatedUserStatus = `${discoveryState.userStatus} | Lifestyle update: ${_message.content.text}`;
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Save the Q&A entry even if parsing failed
+        await saveQAEntry(_runtime, _message, "What's your greatest concern at this time about your loved one's daily life?", _message.content.text, "lifestyle_discovery");
     }
 
     // Store the asked question in memory with stage transition
@@ -647,15 +729,15 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         elizaLogger.info(answer);
         elizaLogger.info(`===========================`);
         
-        // Save the updated user status
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Save the Q&A entry
+        await saveQAEntry(_runtime, _message, "Is your loved one aware you're exploring senior living options and how do they feel about it?", _message.content.text, "readiness_discovery");
         
     } catch (error) {
         elizaLogger.error("Failed to parse JSON response:", error);
         // Fallback to using the entire response as the answer
         answer = aiResponse;
-        updatedUserStatus = `${discoveryState.userStatus} | Readiness update: ${_message.content.text}`;
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Save the Q&A entry even if parsing failed
+        await saveQAEntry(_runtime, _message, "Is your loved one aware you're exploring senior living options and how do they feel about it?", _message.content.text, "readiness_discovery");
     }
 
     // Store the asked question in memory with stage transition
@@ -740,15 +822,15 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         elizaLogger.info(answer);
         elizaLogger.info(`===========================`);
         
-        // Save the updated user status
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Save the Q&A entry
+        await saveQAEntry(_runtime, _message, "What's most important to you in choosing the right community and what support would be most meaningful?", _message.content.text, "priorities_discovery");
         
     } catch (error) {
         elizaLogger.error("Failed to parse JSON response:", error);
         // Fallback to using the entire response as the answer
         answer = aiResponse;
-        updatedUserStatus = `${discoveryState.userStatus} | Priority update: ${_message.content.text}`;
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Save the Q&A entry even if parsing failed
+        await saveQAEntry(_runtime, _message, "What's most important to you in choosing the right community and what support would be most meaningful?", _message.content.text, "priorities_discovery");
     }
 
     // Store the asked question in memory with stage transition
@@ -845,14 +927,13 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         elizaLogger.info(finalResponse);
         elizaLogger.info(`===========================`);
         
-        // Save the updated user status
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Display comprehensive Q&A summary at needs matching stage
+        await displayQASummary(_runtime, _message);
         
     } catch (error) {
         elizaLogger.error("Failed to parse JSON response:", error);
-        // Fallback to comprehensive status update
-        updatedUserStatus = `Complete discovery phase finished. Current status: ${discoveryState.userStatus}. All responses: ${allUserResponses}. Ready for needs matching and Grand Villa recommendations.`;
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Still display Q&A summary even if response generation failed
+        await displayQASummary(_runtime, _message);
         
         // Generate fallback response
         try {
@@ -980,15 +1061,19 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
         elizaLogger.info(response);
         elizaLogger.info(`===========================`);
         
-        // Save the updated user status
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Save the Q&A entry for information requests
+        if (_message.content.text && _message.userId !== _message.agentId) {
+            await saveQAEntry(_runtime, _message, "What would you like to know about Grand Villa?", _message.content.text, "info_sharing");
+        }
         
     } catch (error) {
         elizaLogger.error("Failed to parse JSON response:", error);
         // Fallback response that asks to schedule a visit
         response = `I'd be happy to help you learn more about Grand Villa. ${userName ? `${userName}, ` : ''}would you like to schedule a visit so you can see the community and what daily life would feel like firsthand?`;
-        updatedUserStatus = `${discoveryState.userStatus} | Info sharing: Asked about ${_message.content.text}`;
-        await updateUserStatus(_runtime, _message, updatedUserStatus);
+        // Save the Q&A entry even if parsing failed
+        if (_message.content.text && _message.userId !== _message.agentId) {
+            await saveQAEntry(_runtime, _message, "What would you like to know about Grand Villa?", _message.content.text, "info_sharing");
+        }
     }
 
     // Fallback if response is empty
