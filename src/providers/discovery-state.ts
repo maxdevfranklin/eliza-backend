@@ -149,7 +149,8 @@ export async function getUserResponses(runtime: IAgentRuntime, message: Memory) 
         situation: [],
         lifestyle: [],
         readiness: [],
-        priorities: []
+        priorities: [],
+        qa_entry: []
     };
     
     for (const mem of memories) {

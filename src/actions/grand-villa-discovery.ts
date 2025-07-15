@@ -484,6 +484,13 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 
 // Situation Discovery Handler
 async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    // The 3 basic questions we need to collect answers for
+    const situationQuestions = [
+        "What made you decide to reach out about senior living today?",
+        "What's your biggest concern right now?", 
+        "How is this situation impacting your family?"
+    ];
+    
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "situation", _message.content.text);
@@ -493,84 +500,179 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     
-    // Show previous user responses collected so far
-    const previousResponses = await getUserResponses(_runtime, _message);
+    // Get all Q&A entries to see what questions have been asked/answered
+    const existingQAEntries = await getAllQAEntries(_runtime, _message);
+    const situationQAEntries = existingQAEntries.filter(entry => entry.stage === "situation_discovery");
+    const answeredQuestions = situationQAEntries.map(entry => entry.question);
+    
     elizaLogger.info(`=== SITUATION DISCOVERY STAGE ===`);
-    elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`Already answered questions: ${JSON.stringify(answeredQuestions)}`);
     elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     elizaLogger.info(`================================`)
     
-    //Decide to move on to the next or to final
-    const context = `The user ${userName ? `(${userName}) ` : ''}responded to my request to ask questions before we begin. Their response was: ${_message.content.text}
-
-            Please analyze this response and provide TWO things in JSON format:
-            1. A brief report about the user's current status, needs, and what they want
-            2. A thoughtful, empathetic response that:
-               - ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response` : 'Begin warmly without using a name'}
-               - First acknowledges and validates their response with understanding
-               - Shows genuine care and empathy for their situation
-               - Provides a brief, relevant insight or reassurance about their feelings/concerns
-               - Then naturally transitions to asking what brought them here today or what feels most important to them right now
-               - Should be warm, conversational, and show deep understanding (not too short, but not overly long)
-
-            Return your response in this exact JSON format:
-            {
-                "userReport": "Brief analysis of user's status, needs, and what they want based on their response",
-                "responseMessage": "A thoughtful response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges their answer, shows empathy and understanding, provides brief insight or reassurance, then naturally asks what brought them here today or what feels most important. Keep it warm, genuine, conversational, and LIMIT TO 40 WORDS OR LESS."
-            }
-
-            Make sure to return ONLY valid JSON, no additional text.`;
-
-    const aiResponse = await generateText({
-        runtime: _runtime,
-        context: context,
-        modelClass: ModelClass.SMALL
-    });
-
-    // Parse the JSON response
-    let userReport = "";
-    let answer = "";
+    // Track which questions get answered in this interaction
+    let locallyAnsweredQuestions: string[] = [...answeredQuestions];
     
-    try {
-        const parsed = JSON.parse(aiResponse);
-        // 🔧 Fix: Convert object to string if needed
-        const rawReport = parsed.userReport || "";
-        userReport = typeof rawReport === 'object' ? JSON.stringify(rawReport) : rawReport;
-        answer = parsed.responseMessage || "";
-        
-        // Log the extracted information
-        elizaLogger.info(`=== EXTRACTED USER REPORT ===`);
-        elizaLogger.info(userReport);
-        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
-        elizaLogger.info(answer);
-        elizaLogger.info(`=============================`);
-        
-        // Save the Q&A entry for the situation discovery
-        await saveQAEntry(_runtime, _message, "What made you decide to call us today?", _message.content.text, "situation_discovery");
-        
-    } catch (error) {
-        elizaLogger.error("Failed to parse JSON response:", error);
-        // Fallback to using the entire response as the answer
-        answer = aiResponse;
-        // Save the Q&A entry even if parsing failed
-        await saveQAEntry(_runtime, _message, "What made you decide to call us today?", _message.content.text, "situation_discovery");
-    }
+    // If user provided a response, analyze it for answers to our 3 questions
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        const analysisContext = `Analyze this user response to see which of these 3 questions they answered:
 
-    // Store the asked question in memory with stage transition
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: {
-            text: answer,
-            metadata: { 
-                askedQuestion: answer,
-                stage: "lifestyle_discovery"
+1. "What made you decide to reach out about senior living today?"
+2. "What's your biggest concern right now?"  
+3. "How is this situation impacting your family?"
+
+User response: "${_message.content.text}"
+
+Look for clear answers. A user might answer multiple questions in one response. Be generous in detecting answers - if they mention why they're calling, that answers question 1. If they mention worries/fears, that answers question 2. If they mention family stress/impact, that answers question 3.
+
+Return this JSON format:
+{
+    "question1_answered": true/false,
+    "question1_answer": "their answer or null",
+    "question2_answered": true/false, 
+    "question2_answer": "their answer or null",
+    "question3_answered": true/false,
+    "question3_answer": "their answer or null"
+}
+
+Return ONLY valid JSON.`;
+
+        try {
+            const analysisResponse = await generateText({
+                runtime: _runtime,
+                context: analysisContext,
+                modelClass: ModelClass.SMALL
+            });
+
+            const analysis = JSON.parse(analysisResponse);
+            
+            // Save Q&A entries for questions that were answered
+            if (analysis.question1_answered && analysis.question1_answer) {
+                await saveQAEntry(_runtime, _message, situationQuestions[0], analysis.question1_answer, "situation_discovery");
+                locallyAnsweredQuestions.push(situationQuestions[0]);
+                elizaLogger.info(`✓ Answered Q1: ${situationQuestions[0]}`);
+            }
+            if (analysis.question2_answered && analysis.question2_answer) {
+                await saveQAEntry(_runtime, _message, situationQuestions[1], analysis.question2_answer, "situation_discovery");
+                locallyAnsweredQuestions.push(situationQuestions[1]);
+                elizaLogger.info(`✓ Answered Q2: ${situationQuestions[1]}`);
+            }
+            if (analysis.question3_answered && analysis.question3_answer) {
+                await saveQAEntry(_runtime, _message, situationQuestions[2], analysis.question3_answer, "situation_discovery");
+                locallyAnsweredQuestions.push(situationQuestions[2]);
+                elizaLogger.info(`✓ Answered Q3: ${situationQuestions[2]}`);
+            }
+            
+        } catch (error) {
+            elizaLogger.error("Failed to analyze user response:", error);
+            // Fallback: assume they answered the first unanswered question
+            const unansweredQuestions = situationQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+            if (unansweredQuestions.length > 0) {
+                await saveQAEntry(_runtime, _message, unansweredQuestions[0], _message.content.text, "situation_discovery");
+                locallyAnsweredQuestions.push(unansweredQuestions[0]);
+                elizaLogger.info(`Fallback: Saved answer for ${unansweredQuestions[0]}`);
             }
         }
-    });
-    return answer;
+    }
+    
+    // Use locally tracked answers instead of database retrieval to avoid timing issues
+    const remainingQuestions = situationQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+    
+    elizaLogger.info(`=== REMAINING QUESTIONS CHECK ===`);
+    elizaLogger.info(`Total answered: ${locallyAnsweredQuestions.length}/${situationQuestions.length}`);
+    elizaLogger.info(`Remaining questions: ${JSON.stringify(remainingQuestions)}`);
+    elizaLogger.info(`=================================`);
+    
+    // If all 3 questions are answered, move to next stage
+    if (remainingQuestions.length === 0) {
+        const transitionResponse = `${userName ? `${userName}, ` : ''}Thank you for sharing so openly. I can tell how much you care about your family. Let's talk about your loved one's daily life and what they enjoy doing.`;
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: transitionResponse,
+                metadata: { 
+                    askedQuestion: transitionResponse,
+                    stage: "lifestyle_discovery"
+                }
+            }
+        });
+        
+        return transitionResponse;
+    }
+    
+    // Generate AI response that asks the next unanswered question with context
+    const nextQuestion = remainingQuestions[0];
+    const currentAnsweredCount = situationQuestions.length - remainingQuestions.length;
+    
+    // Get any previous answers to provide context
+    const previousAnswers = situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
+    
+    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing their senior living situation. 
+
+Progress: ${currentAnsweredCount}/3 questions answered so far.
+${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+
+User's last response: "${_message.content.text}"
+
+I need to ask: "${nextQuestion}"
+
+Generate a natural, empathetic response that:
+- ${userName ? `IMPORTANT: Start with the user's name "${userName}" if it flows naturally` : 'Begin warmly without using a name'}
+- Acknowledges what they just shared (if anything)
+- Shows understanding and empathy 
+- Naturally transitions to asking the specific question: "${nextQuestion}"
+- Feels conversational and caring, not scripted
+- Keep it under 25 words
+
+Return ONLY the response text.`;
+
+    try {
+        const aiResponse = await generateText({
+            runtime: _runtime,
+            context: responseContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: response,
+                metadata: { 
+                    askedQuestion: response,
+                    stage: "situation_discovery"
+                }
+            }
+        });
+        
+        return response;
+        
+    } catch (error) {
+        elizaLogger.error("Failed to generate AI response:", error);
+        const fallbackResponse = `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: fallbackResponse,
+                metadata: { 
+                    askedQuestion: fallbackResponse,
+                    stage: "situation_discovery"
+                }
+            }
+        });
+        
+        return fallbackResponse;
+    }
 }
 
 // Lifestyle Discovery Handler  
