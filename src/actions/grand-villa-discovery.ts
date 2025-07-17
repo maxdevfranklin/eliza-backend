@@ -9,6 +9,35 @@ interface QAEntry {
     timestamp: string;
 }
 
+interface ComprehensiveRecord {
+    contact_info: {
+        name?: string;
+        phone?: string;
+        collected_at: string;
+    };
+    situation_discovery: {
+        question: string;
+        answer: string;
+        timestamp: string;
+    }[];
+    lifestyle_discovery: {
+        question: string;
+        answer: string;
+        timestamp: string;
+    }[];
+    readiness_discovery: {
+        question: string;
+        answer: string;
+        timestamp: string;
+    }[];
+    priorities_discovery: {
+        question: string;
+        answer: string;
+        timestamp: string;
+    }[];
+    last_updated: string;
+}
+
 interface ComprehensiveQA {
     name?: string;
     phone?: string;
@@ -222,7 +251,75 @@ export const grandVillaDiscoveryAction: Action = {
     }
 }
 
-// Helper function to save Q&A entry
+// Helper function to get comprehensive record
+async function getComprehensiveRecord(_runtime: IAgentRuntime, _message: Memory): Promise<ComprehensiveRecord | null> {
+    try {
+        const userResponses = await getUserResponses(_runtime, _message);
+        
+        if (userResponses.comprehensive_record && userResponses.comprehensive_record.length > 0) {
+            // Get the most recent comprehensive record
+            const recordString = userResponses.comprehensive_record[userResponses.comprehensive_record.length - 1];
+            return JSON.parse(recordString);
+        }
+        
+        return null;
+    } catch (error) {
+        elizaLogger.error("Error retrieving comprehensive record:", error);
+        return null;
+    }
+}
+
+// Helper function to update comprehensive record
+async function updateComprehensiveRecord(_runtime: IAgentRuntime, _message: Memory, updates: Partial<ComprehensiveRecord>): Promise<void> {
+    try {
+        // Get existing record or create new one
+        let record = await getComprehensiveRecord(_runtime, _message);
+        
+        if (!record) {
+            record = {
+                contact_info: {
+                    collected_at: new Date().toISOString()
+                },
+                situation_discovery: [],
+                lifestyle_discovery: [],
+                readiness_discovery: [],
+                priorities_discovery: [],
+                last_updated: new Date().toISOString()
+            };
+        }
+        
+        // Apply updates
+        if (updates.contact_info) {
+            record.contact_info = { ...record.contact_info, ...updates.contact_info };
+        }
+        if (updates.situation_discovery) {
+            record.situation_discovery = [...record.situation_discovery, ...updates.situation_discovery];
+        }
+        if (updates.lifestyle_discovery) {
+            record.lifestyle_discovery = [...record.lifestyle_discovery, ...updates.lifestyle_discovery];
+        }
+        if (updates.readiness_discovery) {
+            record.readiness_discovery = [...record.readiness_discovery, ...updates.readiness_discovery];
+        }
+        if (updates.priorities_discovery) {
+            record.priorities_discovery = [...record.priorities_discovery, ...updates.priorities_discovery];
+        }
+        
+        record.last_updated = new Date().toISOString();
+        
+        elizaLogger.info(`=== UPDATING COMPREHENSIVE RECORD ===`);
+        elizaLogger.info(`Updates: ${JSON.stringify(updates, null, 2)}`);
+        elizaLogger.info(`====================================`);
+        
+        // Save the updated record
+        await saveUserResponse(_runtime, _message, "comprehensive_record", JSON.stringify(record));
+        
+    } catch (error) {
+        elizaLogger.error("Error updating comprehensive record:", error);
+    }
+}
+
+// Helper function to save Q&A entry (kept for backward compatibility)
 async function saveQAEntry(_runtime: IAgentRuntime, _message: Memory, question: string, answer: string, stage: string): Promise<void> {
     const qaEntry: QAEntry = {
         question: question,
@@ -366,22 +463,19 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 
             // If we found both name and phone, save them and proceed
             if (finalName && finalPhone) {
-                const contactInfo = {
-                    name: finalName,
-                    phone: finalPhone,
-                    collectedAt: new Date().toISOString()
-                };
+                elizaLogger.info(`=== SAVING CONTACT INFO TO COMPREHENSIVE RECORD ===`);
+                elizaLogger.info(`Name: ${finalName}, Phone: ${finalPhone}`);
                 
-                elizaLogger.info(`=== SAVING CONTACT INFO ===`);
-                elizaLogger.info(`contactInfo object: ${JSON.stringify(contactInfo)}`);
-                elizaLogger.info(`contactInfo JSON string: ${JSON.stringify(contactInfo)}`);
+                // Save contact information to comprehensive record
+                await updateComprehensiveRecord(_runtime, _message, {
+                    contact_info: {
+                        name: finalName,
+                        phone: finalPhone,
+                        collected_at: new Date().toISOString()
+                    }
+                });
                 
-                // Save contact information (overwrite any previous partial info)
-                await saveUserResponse(_runtime, _message, "contact_info", JSON.stringify(contactInfo));
-                elizaLogger.info(`Contact info saved to contact_info category`);
-                
-                // Initialize Q&A collection with contact info
-                await saveQAEntry(_runtime, _message, "What is your name and phone number?", `Name: ${finalName}, Phone: ${finalPhone}`, "trust_building");
+                elizaLogger.info(`Contact info saved to comprehensive record`);
                 
                 // Move to next stage with personalized response
                 const response = `Thank you, ${finalName}! I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.`;
@@ -404,17 +498,18 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
             
             // Save partial contact info if we have new information
             if (finalName || finalPhone) {
-                const partialContactInfo = {
-                    name: finalName,
-                    phone: finalPhone,
-                    collectedAt: new Date().toISOString()
-                };
+                elizaLogger.info(`=== SAVING PARTIAL CONTACT INFO TO COMPREHENSIVE RECORD ===`);
+                elizaLogger.info(`Name: ${finalName || 'not provided'}, Phone: ${finalPhone || 'not provided'}`);
                 
-                elizaLogger.info(`=== SAVING PARTIAL CONTACT INFO ===`);
-                elizaLogger.info(`partialContactInfo object: ${JSON.stringify(partialContactInfo)}`);
+                await updateComprehensiveRecord(_runtime, _message, {
+                    contact_info: {
+                        name: finalName,
+                        phone: finalPhone,
+                        collected_at: new Date().toISOString()
+                    }
+                });
                 
-                await saveUserResponse(_runtime, _message, "contact_info", JSON.stringify(partialContactInfo));
-                elizaLogger.info(`Partial contact info saved to contact_info category`);
+                elizaLogger.info(`Partial contact info saved to comprehensive record`);
             }
             
             // If we're missing name or phone, ask for what's missing
@@ -500,9 +595,9 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     
-    // Get all Q&A entries to see what questions have been asked/answered
-    const existingQAEntries = await getAllQAEntries(_runtime, _message);
-    const situationQAEntries = existingQAEntries.filter(entry => entry.stage === "situation_discovery");
+    // Get comprehensive record to see what questions have been asked/answered
+    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
+    const situationQAEntries = comprehensiveRecord?.situation_discovery || [];
     const answeredQuestions = situationQAEntries.map(entry => entry.question);
     
     elizaLogger.info(`=== SITUATION DISCOVERY STAGE ===`);
@@ -547,21 +642,41 @@ Return ONLY valid JSON.`;
 
             const analysis = JSON.parse(analysisResponse);
             
-            // Save Q&A entries for questions that were answered
+            // Save Q&A entries to comprehensive record for questions that were answered
+            const newSituationEntries = [];
             if (analysis.question1_answered && analysis.question1_answer) {
-                await saveQAEntry(_runtime, _message, situationQuestions[0], analysis.question1_answer, "situation_discovery");
+                newSituationEntries.push({
+                    question: situationQuestions[0],
+                    answer: analysis.question1_answer,
+                    timestamp: new Date().toISOString()
+                });
                 locallyAnsweredQuestions.push(situationQuestions[0]);
                 elizaLogger.info(`✓ Answered Q1: ${situationQuestions[0]}`);
             }
             if (analysis.question2_answered && analysis.question2_answer) {
-                await saveQAEntry(_runtime, _message, situationQuestions[1], analysis.question2_answer, "situation_discovery");
+                newSituationEntries.push({
+                    question: situationQuestions[1],
+                    answer: analysis.question2_answer,
+                    timestamp: new Date().toISOString()
+                });
                 locallyAnsweredQuestions.push(situationQuestions[1]);
                 elizaLogger.info(`✓ Answered Q2: ${situationQuestions[1]}`);
             }
             if (analysis.question3_answered && analysis.question3_answer) {
-                await saveQAEntry(_runtime, _message, situationQuestions[2], analysis.question3_answer, "situation_discovery");
+                newSituationEntries.push({
+                    question: situationQuestions[2],
+                    answer: analysis.question3_answer,
+                    timestamp: new Date().toISOString()
+                });
                 locallyAnsweredQuestions.push(situationQuestions[2]);
                 elizaLogger.info(`✓ Answered Q3: ${situationQuestions[2]}`);
+            }
+            
+            // Update comprehensive record with new situation discovery entries
+            if (newSituationEntries.length > 0) {
+                await updateComprehensiveRecord(_runtime, _message, {
+                    situation_discovery: newSituationEntries
+                });
             }
             
         } catch (error) {
@@ -569,7 +684,16 @@ Return ONLY valid JSON.`;
             // Fallback: assume they answered the first unanswered question
             const unansweredQuestions = situationQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
             if (unansweredQuestions.length > 0) {
-                await saveQAEntry(_runtime, _message, unansweredQuestions[0], _message.content.text, "situation_discovery");
+                const fallbackEntry = [{
+                    question: unansweredQuestions[0],
+                    answer: _message.content.text,
+                    timestamp: new Date().toISOString()
+                }];
+                
+                await updateComprehensiveRecord(_runtime, _message, {
+                    situation_discovery: fallbackEntry
+                });
+                
                 locallyAnsweredQuestions.push(unansweredQuestions[0]);
                 elizaLogger.info(`Fallback: Saved answer for ${unansweredQuestions[0]}`);
             }
@@ -693,9 +817,9 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     
-    // Get all Q&A entries to see what questions have been asked/answered
-    const existingQAEntries = await getAllQAEntries(_runtime, _message);
-    const lifestyleQAEntries = existingQAEntries.filter(entry => entry.stage === "lifestyle_discovery");
+    // Get comprehensive record to see what questions have been asked/answered
+    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
+    const lifestyleQAEntries = comprehensiveRecord?.lifestyle_discovery || [];
     const answeredQuestions = lifestyleQAEntries.map(entry => entry.question);
     
     elizaLogger.info(`=== LIFESTYLE DISCOVERY STAGE ===`);
@@ -740,21 +864,41 @@ Return ONLY valid JSON.`;
 
             const analysis = JSON.parse(analysisResponse);
             
-            // Save Q&A entries for questions that were answered
+            // Save Q&A entries to comprehensive record for questions that were answered
+            const newLifestyleEntries = [];
             if (analysis.question1_answered && analysis.question1_answer) {
-                await saveQAEntry(_runtime, _message, lifestyleQuestions[0], analysis.question1_answer, "lifestyle_discovery");
+                newLifestyleEntries.push({
+                    question: lifestyleQuestions[0],
+                    answer: analysis.question1_answer,
+                    timestamp: new Date().toISOString()
+                });
                 locallyAnsweredQuestions.push(lifestyleQuestions[0]);
                 elizaLogger.info(`✓ Answered Q1: ${lifestyleQuestions[0]}`);
             }
             if (analysis.question2_answered && analysis.question2_answer) {
-                await saveQAEntry(_runtime, _message, lifestyleQuestions[1], analysis.question2_answer, "lifestyle_discovery");
+                newLifestyleEntries.push({
+                    question: lifestyleQuestions[1],
+                    answer: analysis.question2_answer,
+                    timestamp: new Date().toISOString()
+                });
                 locallyAnsweredQuestions.push(lifestyleQuestions[1]);
                 elizaLogger.info(`✓ Answered Q2: ${lifestyleQuestions[1]}`);
             }
             if (analysis.question3_answered && analysis.question3_answer) {
-                await saveQAEntry(_runtime, _message, lifestyleQuestions[2], analysis.question3_answer, "lifestyle_discovery");
+                newLifestyleEntries.push({
+                    question: lifestyleQuestions[2],
+                    answer: analysis.question3_answer,
+                    timestamp: new Date().toISOString()
+                });
                 locallyAnsweredQuestions.push(lifestyleQuestions[2]);
                 elizaLogger.info(`✓ Answered Q3: ${lifestyleQuestions[2]}`);
+            }
+            
+            // Update comprehensive record with new lifestyle discovery entries
+            if (newLifestyleEntries.length > 0) {
+                await updateComprehensiveRecord(_runtime, _message, {
+                    lifestyle_discovery: newLifestyleEntries
+                });
             }
             
         } catch (error) {
@@ -762,7 +906,16 @@ Return ONLY valid JSON.`;
             // Fallback: assume they answered the first unanswered question
             const unansweredQuestions = lifestyleQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
             if (unansweredQuestions.length > 0) {
-                await saveQAEntry(_runtime, _message, unansweredQuestions[0], _message.content.text, "lifestyle_discovery");
+                const fallbackEntry = [{
+                    question: unansweredQuestions[0],
+                    answer: _message.content.text,
+                    timestamp: new Date().toISOString()
+                }];
+                
+                await updateComprehensiveRecord(_runtime, _message, {
+                    lifestyle_discovery: fallbackEntry
+                });
+                
                 locallyAnsweredQuestions.push(unansweredQuestions[0]);
                 elizaLogger.info(`Fallback: Saved answer for ${unansweredQuestions[0]}`);
             }
