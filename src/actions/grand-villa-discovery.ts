@@ -251,15 +251,87 @@ export const grandVillaDiscoveryAction: Action = {
     }
 }
 
-// Helper function to get comprehensive record
+// Helper function to get comprehensive record (merges ALL previous records)
 async function getComprehensiveRecord(_runtime: IAgentRuntime, _message: Memory): Promise<ComprehensiveRecord | null> {
     try {
         const userResponses = await getUserResponses(_runtime, _message);
         
         if (userResponses.comprehensive_record && userResponses.comprehensive_record.length > 0) {
-            // Get the most recent comprehensive record
-            const recordString = userResponses.comprehensive_record[userResponses.comprehensive_record.length - 1];
-            return JSON.parse(recordString);
+            elizaLogger.info(`📚 Found ${userResponses.comprehensive_record.length} comprehensive records to merge`);
+            
+            // Merge ALL comprehensive records to get complete history
+            let mergedRecord: ComprehensiveRecord = {
+                contact_info: { collected_at: new Date().toISOString() },
+                situation_discovery: [],
+                lifestyle_discovery: [],
+                readiness_discovery: [],
+                priorities_discovery: [],
+                last_updated: new Date().toISOString()
+            };
+            
+            // Process each record and merge Q&A data
+            for (let i = 0; i < userResponses.comprehensive_record.length; i++) {
+                try {
+                    const record = JSON.parse(userResponses.comprehensive_record[i]);
+                    elizaLogger.info(`📖 Processing record ${i + 1}: ${record.situation_discovery?.length || 0} situation, ${record.lifestyle_discovery?.length || 0} lifestyle entries`);
+                    
+                    // Merge contact info (keep most recent)
+                    if (record.contact_info) {
+                        mergedRecord.contact_info = { ...mergedRecord.contact_info, ...record.contact_info };
+                    }
+                    
+                    // Merge Q&A arrays (avoid duplicates by question text)
+                    if (record.situation_discovery) {
+                        for (const entry of record.situation_discovery) {
+                            const exists = mergedRecord.situation_discovery.some(existing => existing.question === entry.question);
+                            if (!exists) {
+                                mergedRecord.situation_discovery.push(entry);
+                                elizaLogger.info(`✅ Added situation Q&A: ${entry.question}`);
+                            } else {
+                                elizaLogger.info(`⚠️ Skipped duplicate situation Q&A: ${entry.question}`);
+                            }
+                        }
+                    }
+                    
+                    if (record.lifestyle_discovery) {
+                        for (const entry of record.lifestyle_discovery) {
+                            const exists = mergedRecord.lifestyle_discovery.some(existing => existing.question === entry.question);
+                            if (!exists) {
+                                mergedRecord.lifestyle_discovery.push(entry);
+                                elizaLogger.info(`✅ Added lifestyle Q&A: ${entry.question}`);
+                            } else {
+                                elizaLogger.info(`⚠️ Skipped duplicate lifestyle Q&A: ${entry.question}`);
+                            }
+                        }
+                    }
+                    
+                    if (record.readiness_discovery) {
+                        for (const entry of record.readiness_discovery) {
+                            const exists = mergedRecord.readiness_discovery.some(existing => existing.question === entry.question);
+                            if (!exists) {
+                                mergedRecord.readiness_discovery.push(entry);
+                                elizaLogger.info(`✅ Added readiness Q&A: ${entry.question}`);
+                            }
+                        }
+                    }
+                    
+                    if (record.priorities_discovery) {
+                        for (const entry of record.priorities_discovery) {
+                            const exists = mergedRecord.priorities_discovery.some(existing => existing.question === entry.question);
+                            if (!exists) {
+                                mergedRecord.priorities_discovery.push(entry);
+                                elizaLogger.info(`✅ Added priorities Q&A: ${entry.question}`);
+                            }
+                        }
+                    }
+                    
+                } catch (parseError) {
+                    elizaLogger.error(`Error parsing comprehensive record ${i + 1}:`, parseError);
+                }
+            }
+            
+            elizaLogger.info(`🎯 MERGED RESULT: ${mergedRecord.situation_discovery.length} situation, ${mergedRecord.lifestyle_discovery.length} lifestyle entries`);
+            return mergedRecord;
         }
         
         return null;
