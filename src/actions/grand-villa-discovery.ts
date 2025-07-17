@@ -1125,93 +1125,240 @@ Return ONLY the response text, nothing else.`;
 
 // Readiness Discovery Handler
 async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    // The 3 basic readiness questions we need to collect answers for
+    const readinessQuestions = [
+        "Is your loved one aware that you're looking at options?",
+        "How does your loved one feel about the idea of moving?",
+        "Who else is involved in helping make this decision?"
+    ];
+    
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "readiness", _message.content.text);
     }
     
-    // Get user name for potential personalization (randomly use name)
+    // Get contact information for personalization (randomly use name)
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     
-    // Show previous user responses collected so far
-    const previousResponses = await getUserResponses(_runtime, _message);
-    elizaLogger.info(`=== READINESS DISCOVERY STAGE ===`);
-    elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
-    elizaLogger.info(`Current user message: ${_message.content.text}`);
-    elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
-    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
-    elizaLogger.info(`=================================`)
+    // Get comprehensive record to see what questions have been asked/answered
+    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
+    const readinessQAEntries = comprehensiveRecord?.readiness_discovery || [];
+    const answeredQuestions = readinessQAEntries.map(entry => entry.question);
     
-    // Analyze user response and update status using AI
-    const context = `Current user status: "${discoveryState.userStatus}"
-                    User ${userName ? `(${userName}) ` : ''}latest response about their loved one's lifestyle: "${_message.content.text}"
+    elizaLogger.info(`=== READINESS DISCOVERY STAGE ===`);
+    elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`📝 ALL REQUIRED QUESTIONS:`);
+    readinessQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
+    elizaLogger.info(`✅ ANSWERED QUESTIONS (${answeredQuestions.length}/${readinessQuestions.length}):`);
+    answeredQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
+    elizaLogger.info(`❌ MISSING QUESTIONS:`);
+    const missingQuestions = readinessQuestions.filter(q => !answeredQuestions.includes(q));
+    missingQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
+    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
+    elizaLogger.info(`================================`)
+    
+    // Track which questions get answered in this interaction
+    let locallyAnsweredQuestions: string[] = [...answeredQuestions];
+    
+    // If user provided a response, analyze it for answers to our 3 questions
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        const analysisContext = `Analyze this user response to see which of these 3 readiness questions they answered:
 
-                    Please analyze this lifestyle information and provide TWO things in JSON format:
-                    1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
-                    2. A thoughtful, empathetic response that:
-                       - ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response` : 'Begin warmly without using a name'}
-                       - First acknowledges and validates what they shared about their loved one's daily life and activities
-                       - If they mentioned specific interests (reading, sewing, gardening, music, crafts, cooking, etc.), briefly mention how wonderful those interests are
-                       - Connect their interests to similar activities available at senior communities (like "book clubs" for readers, "sewing circles" for sewers, "gardening groups" for gardeners)
-                       - Then naturally transitions to asking about their loved one's awareness of the situation or readiness for change
-                       - Should demonstrate care for both the user and their loved one
+1. "Is your loved one aware that you're looking at options?"
+2. "How does your loved one feel about the idea of moving?"
+3. "Who else is involved in helping make this decision?"
 
-                    Return your response in this exact JSON format:
-                    {
-                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new lifestyle information",
-                        "responseMessage": "A thoughtful response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges their loved one's lifestyle, appreciates their interests, briefly connects interests to community activities (book clubs, sewing groups, etc.), then naturally asks about their loved one's awareness or readiness. Keep it warm, genuine, conversational, and LIMIT TO 40 WORDS OR LESS."
-                    }
+User response: "${_message.content.text}"
 
-                    Make sure to return ONLY valid JSON, no additional text.`;
+Look for clear answers. A user might answer multiple questions in one response. Be generous in detecting answers - if they mention awareness/knowledge, that answers question 1. If they mention feelings/emotions about moving, that answers question 2. If they mention family members/helpers, that answers question 3.
 
-    const aiResponse = await generateText({
+Return this JSON format:
+{
+    "question1_answered": true/false,
+    "question1_answer": "their answer or null",
+    "question2_answered": true/false, 
+    "question2_answer": "their answer or null",
+    "question3_answered": true/false,
+    "question3_answer": "their answer or null"
+}
+
+Return ONLY valid JSON.`;
+
+        try {
+            const analysisResponse = await generateText({
+                runtime: _runtime,
+                context: analysisContext,
+                modelClass: ModelClass.SMALL
+            });
+
+            const analysis = JSON.parse(analysisResponse);
+            
+            // Save Q&A entries to comprehensive record for questions that were answered
+            const newReadinessEntries = [];
+            
+            // Only save questions that haven't been answered before
+            if (analysis.question1_answered && analysis.question1_answer && !answeredQuestions.includes(readinessQuestions[0])) {
+                newReadinessEntries.push({
+                    question: readinessQuestions[0],
+                    answer: analysis.question1_answer,
+                    timestamp: new Date().toISOString()
+                });
+                locallyAnsweredQuestions.push(readinessQuestions[0]);
+                elizaLogger.info(`✓ NEW Answer Q1: ${readinessQuestions[0]}`);
+            } else if (analysis.question1_answered && answeredQuestions.includes(readinessQuestions[0])) {
+                elizaLogger.info(`⚠️ Q1 already answered, skipping: ${readinessQuestions[0]}`);
+                if (!locallyAnsweredQuestions.includes(readinessQuestions[0])) {
+                    locallyAnsweredQuestions.push(readinessQuestions[0]);
+                }
+            }
+            
+            if (analysis.question2_answered && analysis.question2_answer && !answeredQuestions.includes(readinessQuestions[1])) {
+                newReadinessEntries.push({
+                    question: readinessQuestions[1],
+                    answer: analysis.question2_answer,
+                    timestamp: new Date().toISOString()
+                });
+                locallyAnsweredQuestions.push(readinessQuestions[1]);
+                elizaLogger.info(`✓ NEW Answer Q2: ${readinessQuestions[1]}`);
+            } else if (analysis.question2_answered && answeredQuestions.includes(readinessQuestions[1])) {
+                elizaLogger.info(`⚠️ Q2 already answered, skipping: ${readinessQuestions[1]}`);
+                if (!locallyAnsweredQuestions.includes(readinessQuestions[1])) {
+                    locallyAnsweredQuestions.push(readinessQuestions[1]);
+                }
+            }
+            
+            if (analysis.question3_answered && analysis.question3_answer && !answeredQuestions.includes(readinessQuestions[2])) {
+                newReadinessEntries.push({
+                    question: readinessQuestions[2],
+                    answer: analysis.question3_answer,
+                    timestamp: new Date().toISOString()
+                });
+                locallyAnsweredQuestions.push(readinessQuestions[2]);
+                elizaLogger.info(`✓ NEW Answer Q3: ${readinessQuestions[2]}`);
+            } else if (analysis.question3_answered && answeredQuestions.includes(readinessQuestions[2])) {
+                elizaLogger.info(`⚠️ Q3 already answered, skipping: ${readinessQuestions[2]}`);
+                if (!locallyAnsweredQuestions.includes(readinessQuestions[2])) {
+                    locallyAnsweredQuestions.push(readinessQuestions[2]);
+                }
+            }
+            
+            elizaLogger.info(`📝 NEW READINESS ENTRIES TO SAVE: ${newReadinessEntries.length}`);
+            newReadinessEntries.forEach((entry, i) => {
+                elizaLogger.info(`   ${i+1}. ${entry.question}: ${entry.answer}`);
+            });
+            
+            // Update comprehensive record with new readiness discovery entries
+            if (newReadinessEntries.length > 0) {
+                await updateComprehensiveRecord(_runtime, _message, {
+                    readiness_discovery: newReadinessEntries
+                });
+                elizaLogger.info(`✅ SAVED ${newReadinessEntries.length} new readiness Q&A entries to comprehensive record`);
+            } else {
+                elizaLogger.info(`ℹ️ No new readiness Q&A entries to save - all questions already answered`);
+            }
+            
+        } catch (error) {
+            elizaLogger.error("Failed to analyze user response:", error);
+            // Fallback: assume they answered the first unanswered question
+            const unansweredQuestions = readinessQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+            if (unansweredQuestions.length > 0) {
+                const fallbackEntry = [{
+                    question: unansweredQuestions[0],
+                    answer: _message.content.text,
+                    timestamp: new Date().toISOString()
+                }];
+                
+                await updateComprehensiveRecord(_runtime, _message, {
+                    readiness_discovery: fallbackEntry
+                });
+                
+                locallyAnsweredQuestions.push(unansweredQuestions[0]);
+                elizaLogger.info(`Fallback: Saved answer for ${unansweredQuestions[0]}`);
+            }
+        }
+    }
+    
+    // Use locally tracked answers instead of database retrieval to avoid timing issues
+    const remainingQuestions = readinessQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+    
+    elizaLogger.info(`=== REMAINING QUESTIONS CHECK ===`);
+    elizaLogger.info(`Total answered: ${locallyAnsweredQuestions.length}/${readinessQuestions.length}`);
+    elizaLogger.info(`Remaining questions: ${JSON.stringify(remainingQuestions)}`);
+    elizaLogger.info(`=================================`);
+    
+    // If all 3 questions are answered, move to next stage
+    if (remainingQuestions.length === 0) {
+        elizaLogger.info(`🎉 ALL READINESS QUESTIONS ANSWERED! Moving to priorities_discovery`);
+        
+        const transitionResponse = `${userName ? `${userName}, ` : ''}Thank you for sharing about your family's awareness and feelings. Understanding everyone's perspective is so important. Now let's talk about what matters most to you in choosing the right community.`;
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: transitionResponse,
+                metadata: { 
+                    askedQuestion: transitionResponse,
+                    stage: "priorities_discovery"
+                }
+            }
+        });
+        
+        elizaLogger.info(`✅ STAGE TRANSITION: readiness_discovery → priorities_discovery`);
+        return transitionResponse;
+    }
+    
+    elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in readiness_discovery`);
+    
+    // Generate AI response that asks the next unanswered question with context
+    const nextQuestion = remainingQuestions[0];
+    const currentAnsweredCount = readinessQuestions.length - remainingQuestions.length;
+    
+    elizaLogger.info(`🔄 ASKING NEXT QUESTION: "${nextQuestion}"`);
+    elizaLogger.info(`📊 PROGRESS: ${currentAnsweredCount}/${readinessQuestions.length} questions answered`);
+    
+    // Get any previous answers to provide context
+    const previousAnswers = readinessQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
+    
+    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's readiness and family involvement. 
+
+Progress: ${currentAnsweredCount}/3 questions answered so far.
+${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+
+User's last response: "${_message.content.text}"
+
+Next question to ask: "${nextQuestion}"
+
+Generate a warm, natural response (under 25 words) that:
+- Briefly acknowledges what they just shared about readiness/family
+- Shows understanding of the emotional aspects
+- Naturally transitions to asking the next question
+- Feels supportive and caring
+
+Return ONLY the response text, nothing else.`;
+
+    const contextualResponse = await generateText({
         runtime: _runtime,
-        context: context,
+        context: responseContext,
         modelClass: ModelClass.SMALL
     });
-
-    // Parse the JSON response
-    let updatedUserStatus = "";
-    let answer = "";
     
-    try {
-        const parsed = JSON.parse(aiResponse);
-        updatedUserStatus = parsed.updatedUserStatus || "";
-        answer = parsed.responseMessage || "";
-        
-        // Log the extracted information
-        elizaLogger.info(`=== UPDATED USER STATUS ===`);
-        elizaLogger.info(updatedUserStatus);
-        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
-        elizaLogger.info(answer);
-        elizaLogger.info(`===========================`);
-        
-        // Save the Q&A entry
-        await saveQAEntry(_runtime, _message, "Is your loved one aware you're exploring senior living options and how do they feel about it?", _message.content.text, "readiness_discovery");
-        
-    } catch (error) {
-        elizaLogger.error("Failed to parse JSON response:", error);
-        // Fallback to using the entire response as the answer
-        answer = aiResponse;
-        // Save the Q&A entry even if parsing failed
-        await saveQAEntry(_runtime, _message, "Is your loved one aware you're exploring senior living options and how do they feel about it?", _message.content.text, "readiness_discovery");
-    }
-
-    // Store the asked question in memory with stage transition
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
         content: {
-            text: answer,
+            text: contextualResponse,
             metadata: { 
-                askedQuestion: answer,
-                stage: "priorities_discovery"
+                askedQuestion: nextQuestion,
+                stage: "readiness_discovery"
             }
         }
     });
-    return answer;
+    
+    return contextualResponse;
 }
 
 // Priority Discovery Handler
