@@ -644,39 +644,67 @@ Return ONLY valid JSON.`;
             
             // Save Q&A entries to comprehensive record for questions that were answered
             const newSituationEntries = [];
-            if (analysis.question1_answered && analysis.question1_answer) {
+            
+            // Only save questions that haven't been answered before
+            if (analysis.question1_answered && analysis.question1_answer && !answeredQuestions.includes(situationQuestions[0])) {
                 newSituationEntries.push({
                     question: situationQuestions[0],
                     answer: analysis.question1_answer,
                     timestamp: new Date().toISOString()
                 });
                 locallyAnsweredQuestions.push(situationQuestions[0]);
-                elizaLogger.info(`✓ Answered Q1: ${situationQuestions[0]}`);
+                elizaLogger.info(`✓ NEW Answer Q1: ${situationQuestions[0]}`);
+            } else if (analysis.question1_answered && answeredQuestions.includes(situationQuestions[0])) {
+                elizaLogger.info(`⚠️ Q1 already answered, skipping: ${situationQuestions[0]}`);
+                // Still add to local tracking since it's answered
+                if (!locallyAnsweredQuestions.includes(situationQuestions[0])) {
+                    locallyAnsweredQuestions.push(situationQuestions[0]);
+                }
             }
-            if (analysis.question2_answered && analysis.question2_answer) {
+            
+            if (analysis.question2_answered && analysis.question2_answer && !answeredQuestions.includes(situationQuestions[1])) {
                 newSituationEntries.push({
                     question: situationQuestions[1],
                     answer: analysis.question2_answer,
                     timestamp: new Date().toISOString()
                 });
                 locallyAnsweredQuestions.push(situationQuestions[1]);
-                elizaLogger.info(`✓ Answered Q2: ${situationQuestions[1]}`);
+                elizaLogger.info(`✓ NEW Answer Q2: ${situationQuestions[1]}`);
+            } else if (analysis.question2_answered && answeredQuestions.includes(situationQuestions[1])) {
+                elizaLogger.info(`⚠️ Q2 already answered, skipping: ${situationQuestions[1]}`);
+                if (!locallyAnsweredQuestions.includes(situationQuestions[1])) {
+                    locallyAnsweredQuestions.push(situationQuestions[1]);
+                }
             }
-            if (analysis.question3_answered && analysis.question3_answer) {
+            
+            if (analysis.question3_answered && analysis.question3_answer && !answeredQuestions.includes(situationQuestions[2])) {
                 newSituationEntries.push({
                     question: situationQuestions[2],
                     answer: analysis.question3_answer,
                     timestamp: new Date().toISOString()
                 });
                 locallyAnsweredQuestions.push(situationQuestions[2]);
-                elizaLogger.info(`✓ Answered Q3: ${situationQuestions[2]}`);
+                elizaLogger.info(`✓ NEW Answer Q3: ${situationQuestions[2]}`);
+            } else if (analysis.question3_answered && answeredQuestions.includes(situationQuestions[2])) {
+                elizaLogger.info(`⚠️ Q3 already answered, skipping: ${situationQuestions[2]}`);
+                if (!locallyAnsweredQuestions.includes(situationQuestions[2])) {
+                    locallyAnsweredQuestions.push(situationQuestions[2]);
+                }
             }
+            
+            elizaLogger.info(`📝 NEW ENTRIES TO SAVE: ${newSituationEntries.length}`);
+            newSituationEntries.forEach((entry, i) => {
+                elizaLogger.info(`   ${i+1}. ${entry.question}: ${entry.answer}`);
+            });
             
             // Update comprehensive record with new situation discovery entries
             if (newSituationEntries.length > 0) {
                 await updateComprehensiveRecord(_runtime, _message, {
                     situation_discovery: newSituationEntries
                 });
+                elizaLogger.info(`✅ SAVED ${newSituationEntries.length} new Q&A entries to comprehensive record`);
+            } else {
+                elizaLogger.info(`ℹ️ No new Q&A entries to save - all questions already answered`);
             }
             
         } catch (error) {
@@ -866,39 +894,66 @@ Return ONLY valid JSON.`;
             
             // Save Q&A entries to comprehensive record for questions that were answered
             const newLifestyleEntries = [];
-            if (analysis.question1_answered && analysis.question1_answer) {
+            
+            // Only save questions that haven't been answered before
+            if (analysis.question1_answered && analysis.question1_answer && !answeredQuestions.includes(lifestyleQuestions[0])) {
                 newLifestyleEntries.push({
                     question: lifestyleQuestions[0],
                     answer: analysis.question1_answer,
                     timestamp: new Date().toISOString()
                 });
                 locallyAnsweredQuestions.push(lifestyleQuestions[0]);
-                elizaLogger.info(`✓ Answered Q1: ${lifestyleQuestions[0]}`);
+                elizaLogger.info(`✓ NEW Answer Q1: ${lifestyleQuestions[0]}`);
+            } else if (analysis.question1_answered && answeredQuestions.includes(lifestyleQuestions[0])) {
+                elizaLogger.info(`⚠️ Q1 already answered, skipping: ${lifestyleQuestions[0]}`);
+                if (!locallyAnsweredQuestions.includes(lifestyleQuestions[0])) {
+                    locallyAnsweredQuestions.push(lifestyleQuestions[0]);
+                }
             }
-            if (analysis.question2_answered && analysis.question2_answer) {
+            
+            if (analysis.question2_answered && analysis.question2_answer && !answeredQuestions.includes(lifestyleQuestions[1])) {
                 newLifestyleEntries.push({
                     question: lifestyleQuestions[1],
                     answer: analysis.question2_answer,
                     timestamp: new Date().toISOString()
                 });
                 locallyAnsweredQuestions.push(lifestyleQuestions[1]);
-                elizaLogger.info(`✓ Answered Q2: ${lifestyleQuestions[1]}`);
+                elizaLogger.info(`✓ NEW Answer Q2: ${lifestyleQuestions[1]}`);
+            } else if (analysis.question2_answered && answeredQuestions.includes(lifestyleQuestions[1])) {
+                elizaLogger.info(`⚠️ Q2 already answered, skipping: ${lifestyleQuestions[1]}`);
+                if (!locallyAnsweredQuestions.includes(lifestyleQuestions[1])) {
+                    locallyAnsweredQuestions.push(lifestyleQuestions[1]);
+                }
             }
-            if (analysis.question3_answered && analysis.question3_answer) {
+            
+            if (analysis.question3_answered && analysis.question3_answer && !answeredQuestions.includes(lifestyleQuestions[2])) {
                 newLifestyleEntries.push({
                     question: lifestyleQuestions[2],
                     answer: analysis.question3_answer,
                     timestamp: new Date().toISOString()
                 });
                 locallyAnsweredQuestions.push(lifestyleQuestions[2]);
-                elizaLogger.info(`✓ Answered Q3: ${lifestyleQuestions[2]}`);
+                elizaLogger.info(`✓ NEW Answer Q3: ${lifestyleQuestions[2]}`);
+            } else if (analysis.question3_answered && answeredQuestions.includes(lifestyleQuestions[2])) {
+                elizaLogger.info(`⚠️ Q3 already answered, skipping: ${lifestyleQuestions[2]}`);
+                if (!locallyAnsweredQuestions.includes(lifestyleQuestions[2])) {
+                    locallyAnsweredQuestions.push(lifestyleQuestions[2]);
+                }
             }
+            
+            elizaLogger.info(`📝 NEW LIFESTYLE ENTRIES TO SAVE: ${newLifestyleEntries.length}`);
+            newLifestyleEntries.forEach((entry, i) => {
+                elizaLogger.info(`   ${i+1}. ${entry.question}: ${entry.answer}`);
+            });
             
             // Update comprehensive record with new lifestyle discovery entries
             if (newLifestyleEntries.length > 0) {
                 await updateComprehensiveRecord(_runtime, _message, {
                     lifestyle_discovery: newLifestyleEntries
                 });
+                elizaLogger.info(`✅ SAVED ${newLifestyleEntries.length} new lifestyle Q&A entries to comprehensive record`);
+            } else {
+                elizaLogger.info(`ℹ️ No new lifestyle Q&A entries to save - all questions already answered`);
             }
             
         } catch (error) {
