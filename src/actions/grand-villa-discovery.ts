@@ -810,22 +810,24 @@ Return ONLY valid JSON.`;
     
     // If all 3 questions are answered, move to next stage
     if (remainingQuestions.length === 0) {
-        const transitionResponse = `${userName ? `${userName}, ` : ''}Thank you for sharing so openly. I can tell how much you care about your family. Let's talk about your loved one's daily life and what they enjoy doing.`;
+        elizaLogger.info("All situation questions answered, moving to lifestyle_discovery stage");
         
+        // Move to lifestyle discovery stage and let it handle the response
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
             userId: _message.userId,
             agentId: _message.agentId,
             content: {
-                text: transitionResponse,
+                text: "STAGE_TRANSITION", // Placeholder that won't be shown
                 metadata: { 
-                    askedQuestion: transitionResponse,
-                    stage: "lifestyle_discovery"
+                    stage: "lifestyle_discovery",
+                    transition: true
                 }
             }
         });
         
-        return transitionResponse;
+        // Let lifestyle discovery handler create the actual response
+        return await handleLifestyleQuestions(_runtime, _message, _state, discoveryState);
     }
     
     // Generate AI response that asks the next unanswered question with context
@@ -1059,22 +1061,24 @@ Return ONLY valid JSON.`;
     
     // If all 3 questions are answered, move to next stage
     if (remainingQuestions.length === 0) {
-        const transitionResponse = `${userName ? `${userName}, ` : ''}Thank you for sharing about their daily life and interests. Understanding what they enjoy helps us find the right community fit. Now I'd like to ask about their awareness of this process.`;
+        elizaLogger.info("All lifestyle questions answered, moving to readiness_discovery stage");
         
+        // Move to readiness discovery stage and let it handle the response
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
             userId: _message.userId,
             agentId: _message.agentId,
             content: {
-                text: transitionResponse,
+                text: "STAGE_TRANSITION", // Placeholder that won't be shown
                 metadata: { 
-                    askedQuestion: transitionResponse,
-                    stage: "readiness_discovery"
+                    stage: "readiness_discovery",
+                    transition: true
                 }
             }
         });
         
-        return transitionResponse;
+        // Let readiness discovery handler create the actual response
+        return await handleReadinessQuestions(_runtime, _message, _state, discoveryState);
     }
     
     // Determine which question to ask next and generate a contextual response
@@ -1101,26 +1105,49 @@ Generate a warm, natural response (under 25 words) that:
 
 Return ONLY the response text, nothing else.`;
 
-    const contextualResponse = await generateText({
-        runtime: _runtime,
-        context: responseContext,
-        modelClass: ModelClass.SMALL
-    });
-    
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: {
-            text: contextualResponse,
-            metadata: { 
-                askedQuestion: nextQuestion,
-                stage: "lifestyle_discovery"
+    try {
+        const aiResponse = await generateText({
+            runtime: _runtime,
+            context: responseContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: response,
+                metadata: { 
+                    askedQuestion: response,
+                    stage: "lifestyle_discovery"
+                }
             }
-        }
-    });
-    
-    return contextualResponse;
+        });
+        
+        return response;
+        
+    } catch (error) {
+        elizaLogger.error("Failed to generate AI response:", error);
+        const fallbackResponse = `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: fallbackResponse,
+                metadata: { 
+                    askedQuestion: fallbackResponse,
+                    stage: "lifestyle_discovery"
+                }
+            }
+        });
+        
+        return fallbackResponse;
+    }
 }
 
 // Readiness Discovery Handler
@@ -1289,25 +1316,24 @@ Return ONLY valid JSON.`;
     
     // If all 3 questions are answered, move to next stage
     if (remainingQuestions.length === 0) {
-        elizaLogger.info(`🎉 ALL READINESS QUESTIONS ANSWERED! Moving to priorities_discovery`);
+        elizaLogger.info("All readiness questions answered, moving to priorities_discovery stage");
         
-        const transitionResponse = `${userName ? `${userName}, ` : ''}Thank you for sharing about your family's awareness and feelings. Understanding everyone's perspective is so important. Now let's talk about what matters most to you in choosing the right community.`;
-        
+        // Move to priorities discovery stage and let it handle the response
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
             userId: _message.userId,
             agentId: _message.agentId,
             content: {
-                text: transitionResponse,
+                text: "STAGE_TRANSITION", // Placeholder that won't be shown
                 metadata: { 
-                    askedQuestion: transitionResponse,
-                    stage: "priorities_discovery"
+                    stage: "priorities_discovery",
+                    transition: true
                 }
             }
         });
         
-        elizaLogger.info(`✅ STAGE TRANSITION: readiness_discovery → priorities_discovery`);
-        return transitionResponse;
+        // Let priorities discovery handler create the actual response
+        return await handlePriorityQuestions(_runtime, _message, _state, discoveryState);
     }
     
     elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in readiness_discovery`);
