@@ -1429,9 +1429,11 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         await saveUserResponse(_runtime, _message, "priorities", _message.content.text);
     }
     
-    // Get user name for potential personalization (randomly use name)
+    // Get contact information for personalization
+    const contactInfo = await getContactInfo(_runtime, _message);
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    const lovedOneName = contactInfo?.loved_one_name || "your loved one";
     
     // Show previous user responses collected so far
     const previousResponses = await getUserResponses(_runtime, _message);
@@ -1442,24 +1444,24 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     elizaLogger.info(`================================`)
     
-    // Analyze user response and update status using AI
+    // Analyze user response and update status using AI with deeply emotional, empathetic language
     const context = `Current user status: "${discoveryState.userStatus}"
-                    User ${userName ? `(${userName}) ` : ''}latest response about their loved one's readiness: "${_message.content.text}"
+                    User ${userName ? `(${userName}) ` : ''}latest response about ${lovedOneName}'s readiness: "${_message.content.text}"
 
                     Please analyze this readiness information and provide TWO things in JSON format:
                     1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
-                    2. A thoughtful, empathetic response that:
+                    2. A deeply empathetic, heartfelt response that:
                        - ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response` : 'Begin warmly without using a name'}
-                       - First acknowledges and validates what they shared about their loved one's readiness and feelings
-                       - Shows genuine understanding of the emotional complexity of the situation
-                       - Provides reassurance or insight about the transition process or their loved one's feelings
-                       - Then naturally transitions to asking about their priorities in choosing a community or what support would be most meaningful
-                       - Should demonstrate sensitivity to the emotional aspects of this decision
+                       - First acknowledges the emotional weight and difficulty with phrases like "It sounds like this has been incredibly hard for both of you" or "That's a lot to carry, and you're doing your best in a tough situation"
+                       - Shows deep understanding of their love and concern for ${lovedOneName}
+                       - Then asks something emotionally meaningful like "When you think about what might bring ${lovedOneName} a little more peace—or even a small sense of joy—what comes to mind?" or "If you could wave a magic wand and change just one thing for ${lovedOneName} right now, what would it be?"
+                       - Uses gentle, compassionate language that honors their feelings and the difficulty of this journey
+                       - Should feel like a caring friend who truly understands their situation
 
                     Return your response in this exact JSON format:
                     {
                         "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new readiness information",
-                        "responseMessage": "A thoughtful response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges their loved one's readiness, shows understanding of the emotional complexity, provides reassurance about the process, then naturally asks about their priorities or support needs. Keep it warm, genuine, conversational, and LIMIT TO 35 WORDS OR LESS."
+                        "responseMessage": "A deeply empathetic response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges the emotional difficulty, shows understanding of their love for ${lovedOneName}, and asks a heartfelt question about what would bring peace, joy, or meaningful change. Keep it warm, genuine, conversational, and emotionally resonant. LIMIT TO 40 WORDS OR LESS."
                     }
 
                     Make sure to return ONLY valid JSON, no additional text.`;
@@ -1488,15 +1490,15 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         elizaLogger.info(answer);
         elizaLogger.info(`===========================`);
         
-        // Save the Q&A entry
-        await saveQAEntry(_runtime, _message, "What's most important to you in choosing the right community and what support would be most meaningful?", _message.content.text, "priorities_discovery");
+        // Save the Q&A entry with emotional question
+        await saveQAEntry(_runtime, _message, `What would bring ${lovedOneName} the most peace and joy in their life?`, _message.content.text, "priorities_discovery");
         
     } catch (error) {
         elizaLogger.error("Failed to parse JSON response:", error);
         // Fallback to using the entire response as the answer
         answer = aiResponse;
         // Save the Q&A entry even if parsing failed
-        await saveQAEntry(_runtime, _message, "What's most important to you in choosing the right community and what support would be most meaningful?", _message.content.text, "priorities_discovery");
+        await saveQAEntry(_runtime, _message, `What would bring ${lovedOneName} the most peace and joy in their life?`, _message.content.text, "priorities_discovery");
     }
 
     // Store the asked question in memory with stage transition
