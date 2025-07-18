@@ -1542,9 +1542,11 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
     elizaLogger.info(`===============================`);
     
-    // Get user name for potential personalization (randomly use name)  
+    // Get contact information for personalization
+    const contactInfo = await getContactInfo(_runtime, _message);
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    const lovedOneName = contactInfo?.loved_one_name || "your loved one";
     elizaLogger.info(`Using name in needs matching: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     
     // Combine all responses for comprehensive analysis
@@ -1555,19 +1557,29 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         ...prioritiesResponses
     ].join(" ");
     
-    // Analyze user response and update status using AI (like other stages)
+    // Analyze user response and update status using AI with deeply emotional, empathetic language
     const context = `Current user status: "${discoveryState.userStatus}"
-                    User ${userName ? `(${userName}) ` : ''}latest response about their priorities: "${_message.content.text}"
+                    User ${userName ? `(${userName}) ` : ''}latest response about what would bring ${lovedOneName} peace and joy: "${_message.content.text}"
                     All user responses throughout discovery: "${allUserResponses}"
 
                     Please analyze this information and provide TWO things in JSON format:
                     1. A comprehensive final status report about the user's complete situation, needs, interests, priorities, and what they want, incorporating all discovery information
-                    2. A warm, personalized response that matches their needs to Grand Villa's offerings
+                    2. A deeply empathetic, beautiful response that acknowledges what they shared and naturally connects to Grand Villa, similar to this example:
+                       "That's such a beautiful way to put it, ${userName}—helping her find a new way to see life. It sounds like being surrounded by others and having opportunities to connect could really lift her spirits. I'd love to learn more about what kind of activities or social interactions have helped her feel most like herself in the past—so we can explore what might feel familiar and comforting as she considers this next step."
+
+                    Your response should:
+                    - ${userName ? `Start with the user's name "${userName}" and acknowledge what they shared in a beautiful, emotional way` : 'Begin by acknowledging what they shared in a beautiful, emotional way'}
+                    - Build on their emotional response about what ${lovedOneName} needs for peace/joy
+                    - Show how Grand Villa naturally provides those things (community, activities, connections, care)
+                    - Use phrases like "That's such a beautiful way to put it" or "It sounds like" to validate their feelings
+                    - Naturally transition to how Grand Villa could provide what ${lovedOneName} needs
+                    - Feel like a caring friend who truly understands and sees the beauty in their love
+                    - Be emotionally resonant and deeply empathetic
 
                     Return your response in this exact JSON format:
                     {
                         "updatedUserStatus": "Comprehensive final analysis of user's complete situation, family needs, interests, priorities, readiness level, and what they're looking for in senior living, incorporating all discovery information",
-                        "responseMessage": "A warm response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges their priorities, matches their loved one's interests to specific Grand Villa activities (book clubs, sewing circles, gardening groups, music programs, etc.), explains why Grand Villa fits their situation, and encourages a visit. Keep it personal, caring, conversational, and LIMIT TO 60 WORDS OR LESS."
+                        "responseMessage": "A deeply empathetic, beautiful response that ${userName ? `starts with '${userName},' and ` : ''}acknowledges what they shared in an emotional way, builds on their feelings about ${lovedOneName}, and naturally connects to how Grand Villa could provide the peace, joy, community, or activities they mentioned. Should feel like a caring friend who sees the beauty in their love. LIMIT TO 65 WORDS OR LESS."
                     }
 
                     Make sure to return ONLY valid JSON, no additional text.`;
@@ -1603,19 +1615,23 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         // Still display Q&A summary even if response generation failed
         await displayQASummary(_runtime, _message);
         
-        // Generate fallback response
+        // Generate fallback response with emotional tone
         try {
             const fallbackPrompt = `User ${userName ? `(${userName}) ` : ''}comprehensive status: "${discoveryState.userStatus}"
                                    All user responses throughout discovery: "${allUserResponses}"
+                                   They want to bring ${lovedOneName} peace and joy: "${_message.content.text}"
 
-                                   Based on this understanding, generate a short, warm response that:
-                                   ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response.` : ''}
-                                   1. Briefly acknowledges their loved one's main needs and personality
-                                   2. If they mentioned specific interests (reading, sewing, gardening, music, crafts, cooking, games, etc.), specifically mention how Grand Villa has those activities (book clubs, sewing circles, gardening groups, music programs, art classes, cooking activities, game nights, etc.)
-                                   3. Simply explains why Grand Villa feels like a good fit for their situation
-                                   4. Encourages them to visit to see it for themselves
+                                   Based on this understanding, generate a deeply empathetic response similar to this example:
+                                   "That's such a beautiful way to put it, ${userName || 'John'}—helping her find a new way to see life. It sounds like being surrounded by others and having opportunities to connect could really lift her spirits."
 
-                                   ${userName ? `Start the response with "${userName}," and then continue.` : ''} Keep it conversational, caring, and personal. LIMIT TO 60 WORDS OR LESS. Make it feel like you really listened to their specific situation.`;
+                                   Your response should:
+                                   ${userName ? `IMPORTANT: Start with the user's name "${userName}" and acknowledge what they shared in a beautiful, emotional way` : 'Begin by acknowledging what they shared in a beautiful, emotional way'}
+                                   1. Use phrases like "That's such a beautiful way to put it" or "It sounds like" to validate their feelings
+                                   2. Build on what they said about bringing ${lovedOneName} peace/joy
+                                   3. Naturally connect to how Grand Villa could provide those things (community, activities, connections)
+                                   4. Feel like a caring friend who sees the beauty in their love for ${lovedOneName}
+
+                                   ${userName ? `Start the response with "${userName}," and then continue.` : ''} Keep it emotionally resonant, caring, and deeply empathetic. LIMIT TO 65 WORDS OR LESS. Make it feel like you truly understand the beauty of their love and care.`;
             
             const personalizedResponse = await generateText({
                 runtime: _runtime,
@@ -1634,7 +1650,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
 
     // Ultimate fallback to default response if all generation fails
     if (!finalResponse) {
-        finalResponse = `I can see how much you care about finding the right place. Grand Villa has wonderful activities like book clubs, sewing circles, gardening groups, and music programs. The staff really focus on making residents feel at home. Would you like to visit so you can see what daily life would feel like?`;
+        finalResponse = `${userName ? `${userName}, ` : ''}That's such a beautiful way to think about it—wanting to bring ${lovedOneName} peace and joy. It sounds like having a caring community around them could really make a difference. Grand Villa has that warm, supportive environment where residents truly feel at home. Would you like to visit and see how the community could embrace ${lovedOneName}?`;
     }
     
     // Store the needs matching response in memory with stage transition
