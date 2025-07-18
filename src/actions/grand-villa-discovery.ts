@@ -13,6 +13,7 @@ interface ComprehensiveRecord {
     contact_info: {
         name?: string;
         phone?: string;
+        loved_one_name?: string;
         collected_at: string;
     };
     situation_discovery: {
@@ -494,21 +495,24 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
         // Check if we already have any contact info stored
         let existingContactInfo = await getContactInfo(_runtime, _message);
         
-        // Try to extract name and phone number from ALL trust building responses
-        const extractionContext = `Please extract the user's name and phone number from these responses: "${allTrustBuildingText}"
+        // Try to extract name, phone number, and loved one's name from ALL trust building responses
+        const extractionContext = `Please extract the user's information from these responses: "${allTrustBuildingText}"
 
             Look for:
-            - Full name (first and last name)
+            - User's full name (first and last name)
             - Phone number (any format: xxx-xxx-xxxx, (xxx) xxx-xxxx, xxx.xxx.xxxx, xxxxxxxxxx)
+            - Name of their loved one/family member (the person they're seeking senior living for - could be "my mom", "my father", "John", "Mary", etc.)
             
-            ${existingContactInfo ? `Note: We may already have some info - Name: ${existingContactInfo.name || 'none'}, Phone: ${existingContactInfo.phone || 'none'}` : ''}
+            ${existingContactInfo ? `Note: We may already have some info - Name: ${existingContactInfo.name || 'none'}, Phone: ${existingContactInfo.phone || 'none'}, Loved One: ${existingContactInfo.loved_one_name || 'none'}` : ''}
             
             Return your response in this exact JSON format:
             {
-                "name": "extracted full name or null if not found",
+                "name": "extracted user's full name or null if not found",
                 "phone": "extracted phone number in clean format (xxx-xxx-xxxx) or null if not found",
+                "loved_one_name": "extracted loved one's name or null if not found",
                 "foundName": true/false,
-                "foundPhone": true/false
+                "foundPhone": true/false,
+                "foundLovedOneName": true/false
             }
             
             Make sure to return ONLY valid JSON, no additional text.`;
@@ -525,24 +529,28 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
             // Merge with existing info if we have any
             let finalName = parsed.foundName && parsed.name ? parsed.name : (existingContactInfo?.name || null);
             let finalPhone = parsed.foundPhone && parsed.phone ? parsed.phone : (existingContactInfo?.phone || null);
+            let finalLovedOneName = parsed.foundLovedOneName && parsed.loved_one_name ? parsed.loved_one_name : (existingContactInfo?.loved_one_name || null);
             
-            elizaLogger.info(`=== NAME & PHONE EXTRACTION ===`);
+            elizaLogger.info(`=== CONTACT INFO EXTRACTION ===`);
             elizaLogger.info(`Extracted name: ${parsed.foundName ? parsed.name : 'NO'}`);
             elizaLogger.info(`Extracted phone: ${parsed.foundPhone ? parsed.phone : 'NO'}`);
+            elizaLogger.info(`Extracted loved one: ${parsed.foundLovedOneName ? parsed.loved_one_name : 'NO'}`);
             elizaLogger.info(`Final name: ${finalName || 'NO'}`);
             elizaLogger.info(`Final phone: ${finalPhone || 'NO'}`);
-            elizaLogger.info(`==============================`);
+            elizaLogger.info(`Final loved one: ${finalLovedOneName || 'NO'}`);
+            elizaLogger.info(`===============================`);
 
-            // If we found both name and phone, save them and proceed
-            if (finalName && finalPhone) {
+            // If we found all three pieces of info, save them and proceed
+            if (finalName && finalPhone && finalLovedOneName) {
                 elizaLogger.info(`=== SAVING CONTACT INFO TO COMPREHENSIVE RECORD ===`);
-                elizaLogger.info(`Name: ${finalName}, Phone: ${finalPhone}`);
+                elizaLogger.info(`Name: ${finalName}, Phone: ${finalPhone}, Loved One: ${finalLovedOneName}`);
                 
                 // Save contact information to comprehensive record
                 await updateComprehensiveRecord(_runtime, _message, {
                     contact_info: {
                         name: finalName,
                         phone: finalPhone,
+                        loved_one_name: finalLovedOneName,
                         collected_at: new Date().toISOString()
                     }
                 });
@@ -569,14 +577,15 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
             }
             
             // Save partial contact info if we have new information
-            if (finalName || finalPhone) {
+            if (finalName || finalPhone || finalLovedOneName) {
                 elizaLogger.info(`=== SAVING PARTIAL CONTACT INFO TO COMPREHENSIVE RECORD ===`);
-                elizaLogger.info(`Name: ${finalName || 'not provided'}, Phone: ${finalPhone || 'not provided'}`);
+                elizaLogger.info(`Name: ${finalName || 'not provided'}, Phone: ${finalPhone || 'not provided'}, Loved One: ${finalLovedOneName || 'not provided'}`);
                 
                 await updateComprehensiveRecord(_runtime, _message, {
                     contact_info: {
                         name: finalName,
                         phone: finalPhone,
+                        loved_one_name: finalLovedOneName,
                         collected_at: new Date().toISOString()
                     }
                 });
@@ -584,14 +593,19 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
                 elizaLogger.info(`Partial contact info saved to comprehensive record`);
             }
             
-            // If we're missing name or phone, ask for what's missing
+            // If we're missing any required info, ask for what's missing
             let missingInfoResponse = "";
-            if (!finalName && !finalPhone) {
-                missingInfoResponse = "I'd love to help you! To get started, could I get your name and phone number? That way I can provide you with personalized information and follow up if needed.";
-            } else if (!finalName) {
-                missingInfoResponse = `Thanks for the phone number! Could I also get your name so I can personalize our conversation?`;
-            } else if (!finalPhone) {
-                missingInfoResponse = `Thanks, ${finalName}! Could I also get your phone number? That way I can follow up with any additional information that might be helpful.`;
+            const missingItems = [];
+            if (!finalName) missingItems.push("your name");
+            if (!finalPhone) missingItems.push("your phone number");
+            if (!finalLovedOneName) missingItems.push("your loved one's name");
+            
+            if (missingItems.length === 3) {
+                missingInfoResponse = "I'd love to help you! To get started, could I get your name, phone number, and the name of your loved one you're looking for senior living options for?";
+            } else if (missingItems.length === 2) {
+                missingInfoResponse = `Thanks for sharing! Could I also get ${missingItems.join(" and ")}?`;
+            } else if (missingItems.length === 1) {
+                missingInfoResponse = `${finalName ? `Thanks, ${finalName}!` : 'Thanks!'} Could I also get ${missingItems[0]}?`;
             }
             
             // Stay in trust building stage
@@ -610,9 +624,9 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
             return missingInfoResponse;
             
         } catch (error) {
-            elizaLogger.error("Error extracting name/phone:", error);
-            // Fallback to asking for contact info
-            const fallbackResponse = "I'd love to help you! To get started, could I get your name and phone number? That way I can provide you with personalized information and follow up if needed.";
+            elizaLogger.error("Error extracting contact info:", error);
+            // Fallback to asking for all contact info
+            const fallbackResponse = "I'd love to help you! To get started, could I get your name, phone number, and the name of your loved one you're looking for senior living options for?";
             
             await _runtime.messageManager.createMemory({
                 roomId: _message.roomId,
@@ -630,8 +644,8 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
         }
     }
     
-    // First interaction - ask for name and phone
-    const initialResponse = "Hello! I'm Grace, and I'm here to help you explore senior living options for your family. To get started, could I get your name and phone number? That way I can provide you with personalized information and follow up if needed.";
+    // First interaction - ask for name, phone, and loved one's name
+    const initialResponse = "Hello! I'm Grace, and I'm here to help you explore senior living options for your family. To get started, could I get your name, phone number, and the name of your loved one you're looking for senior living options for?";
     
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
@@ -2048,7 +2062,7 @@ async function getUserFirstName(_runtime: IAgentRuntime, _message: Memory): Prom
 }
 
 // Helper function to get stored contact information
-async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{name?: string, phone?: string} | null> {
+async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{name?: string, phone?: string, loved_one_name?: string} | null> {
     let contactInfoArray: string[] = [];
     
     try {
@@ -2077,8 +2091,8 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
             
             const parsed = JSON.parse(cleanJsonString);
             elizaLogger.info(`getContactInfo - parsed: ${JSON.stringify(parsed)}`);
-            elizaLogger.info(`Retrieved contact info: Name=${parsed.name}, Phone=${parsed.phone}`);
-            return { name: parsed.name, phone: parsed.phone };
+            elizaLogger.info(`Retrieved contact info: Name=${parsed.name}, Phone=${parsed.phone}, Loved One=${parsed.loved_one_name}`);
+            return { name: parsed.name, phone: parsed.phone, loved_one_name: parsed.loved_one_name };
         }
         
         elizaLogger.info(`getContactInfo - no contact info found`);
