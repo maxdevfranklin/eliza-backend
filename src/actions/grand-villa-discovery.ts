@@ -665,21 +665,24 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 
 // Situation Discovery Handler
 async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
-    // The 3 basic questions we need to collect answers for
-    const situationQuestions = [
-        "What made you decide to reach out about senior living today?",
-        "What's your biggest concern right now?", 
-        "How is this situation impacting your family?"
-    ];
-    
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "situation", _message.content.text);
     }
     
-    // Get contact information for personalization (randomly use name)
+    // Get contact information for personalization
+    const contactInfo = await getContactInfo(_runtime, _message);
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    
+    // Create personalized questions using loved one's name
+    const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const situationQuestions = [
+        "What made you decide to reach out about senior living today?",
+        `What's your biggest concern about ${lovedOneName} right now?`, 
+        "How is this situation impacting your family?",
+        `Where does ${lovedOneName} currently live?`
+    ];
     
     // Get comprehensive record to see what questions have been asked/answered
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -695,17 +698,18 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     // Track which questions get answered in this interaction
     let locallyAnsweredQuestions: string[] = [...answeredQuestions];
     
-    // If user provided a response, analyze it for answers to our 3 questions
+    // If user provided a response, analyze it for answers to our 4 questions
     if (_message.content.text && _message.userId !== _message.agentId) {
-        const analysisContext = `Analyze this user response to see which of these 3 questions they answered:
+        const analysisContext = `Analyze this user response to see which of these 4 questions they answered:
 
 1. "What made you decide to reach out about senior living today?"
-2. "What's your biggest concern right now?"  
+2. "What's your biggest concern about ${lovedOneName} right now?"  
 3. "How is this situation impacting your family?"
+4. "Where does ${lovedOneName} currently live?"
 
 User response: "${_message.content.text}"
 
-Look for clear answers. A user might answer multiple questions in one response. Be generous in detecting answers - if they mention why they're calling, that answers question 1. If they mention worries/fears, that answers question 2. If they mention family stress/impact, that answers question 3.
+Look for clear answers. A user might answer multiple questions in one response. Be generous in detecting answers - if they mention why they're calling, that answers question 1. If they mention worries/fears about their loved one, that answers question 2. If they mention family stress/impact, that answers question 3. If they mention living arrangements/current residence, that answers question 4.
 
 Return this JSON format:
 {
@@ -714,7 +718,9 @@ Return this JSON format:
     "question2_answered": true/false, 
     "question2_answer": "their answer or null",
     "question3_answered": true/false,
-    "question3_answer": "their answer or null"
+    "question3_answer": "their answer or null",
+    "question4_answered": true/false,
+    "question4_answer": "their answer or null"
 }
 
 Return ONLY valid JSON.`;
@@ -778,6 +784,21 @@ Return ONLY valid JSON.`;
                 }
             }
             
+            if (analysis.question4_answered && analysis.question4_answer && !answeredQuestions.includes(situationQuestions[3])) {
+                newSituationEntries.push({
+                    question: situationQuestions[3],
+                    answer: analysis.question4_answer,
+                    timestamp: new Date().toISOString()
+                });
+                locallyAnsweredQuestions.push(situationQuestions[3]);
+                elizaLogger.info(`✓ NEW Answer Q4: ${situationQuestions[3]}`);
+            } else if (analysis.question4_answered && answeredQuestions.includes(situationQuestions[3])) {
+                elizaLogger.info(`⚠️ Q4 already answered, skipping: ${situationQuestions[3]}`);
+                if (!locallyAnsweredQuestions.includes(situationQuestions[3])) {
+                    locallyAnsweredQuestions.push(situationQuestions[3]);
+                }
+            }
+            
             elizaLogger.info(`📝 NEW ENTRIES TO SAVE: ${newSituationEntries.length}`);
             newSituationEntries.forEach((entry, i) => {
                 elizaLogger.info(`   ${i+1}. ${entry.question}: ${entry.answer}`);
@@ -822,7 +843,7 @@ Return ONLY valid JSON.`;
     elizaLogger.info(`Remaining questions: ${JSON.stringify(remainingQuestions)}`);
     elizaLogger.info(`=================================`);
     
-    // If all 3 questions are answered, move to next stage
+    // If all 4 questions are answered, move to next stage
     if (remainingQuestions.length === 0) {
         elizaLogger.info("All situation questions answered, moving to lifestyle_discovery stage");
         
@@ -853,7 +874,7 @@ Return ONLY valid JSON.`;
     
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing their senior living situation. 
 
-Progress: ${currentAnsweredCount}/3 questions answered so far.
+Progress: ${currentAnsweredCount}/4 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
 User's last response: "${_message.content.text}"
