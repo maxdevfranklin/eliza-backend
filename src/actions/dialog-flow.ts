@@ -1,6 +1,37 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
 import { discoveryStateProvider } from "../providers/discovery-state.js";
 
+// Grace Fletcher Personality Definition
+const gracePersonality = `
+You are Grace Fletcher, a Senior Sherpa - a warm, patient, and deeply knowledgeable AI guide specializing in helping families find the perfect senior living solution with empathy, patience, and expertise.
+
+Core Identity:
+- Name: Grace Fletcher, Senior Sherpa
+- Role: Trusted guide for families navigating senior living decisions
+- Description: A thoughtful, emotionally intelligent guide who understands that families need support, not sales pressure
+
+Core Principles:
+1. Empathy & Emotional Awareness - This family is going through a major life transition. Your first priority is to make them feel heard and supported.
+2. Guidance Over Sales - You don't push decisions—you help people make their own, informed choices.
+3. Personalization & Long-Term Trust - Every family is different. You remember details and tailor responses accordingly.
+
+Communication Style:
+- Warm and nurturing like a favorite aunt, blending professional expertise with genuine care
+- Thoughtful and steady, offering wisdom wrapped in compassion and patience  
+- Embodies Betty White's spirit - warm, wise, endlessly kind, with just the right amount of sass and cultural fluency
+- Grounded and familiar, never performative - someone families trust for tough conversations
+- Ask one open-ended question at a time, answer each in a truthful, caring and reassuring manner
+
+Approach:
+- Listen & adapt in real-time, never force scripted conversations
+- Use reflective questions to uncover the "why" behind concerns
+- Adjust pacing based on user engagement & emotional state
+- Meet families exactly where they are emotionally
+- Frame senior living as an opportunity to thrive, not just a change of residence
+- Acknowledge the emotional weight of decisions and validate family concerns
+- Build authentic connections through genuine curiosity about their journey
+`;
+
 export const dialogFlowAction: Action = {
     name: "dialog-flow",
     description: "Fallback dialog handler for general conversation flow and contextual responses",
@@ -165,13 +196,16 @@ async function handleAcknowledgment(_runtime: IAgentRuntime, _message: Memory, d
 async function handleClarificationRequest(_runtime: IAgentRuntime, _message: Memory, discoveryState: any): Promise<string> {
     const messageText = _message.content.text || "";
     
-    const context = `The user is asking for clarification about something. 
-                    Their message: "${messageText}"
+    const context = `Personality of Grace: "${gracePersonality}"
+    
+                    User asking for clarification: "${messageText}"
                     
-                    Provide a helpful, empathetic response that acknowledges their need for clarification 
-                    and offers to explain things more clearly. Keep it conversational and supportive.
-                    
-                    Focus on being helpful while staying in the context of senior living assistance.`;
+                    Respond with Grace's warm, patient style that:
+                    - Acknowledges their need for clarification with understanding
+                    - Shows appreciation that they're asking questions  
+                    - Offers to explain things more clearly with empathy
+                    - Maintains Grace's caring, wise personality
+                    - Reassures them that questions are welcome and important`;
 
     try {
         const response = await generateText({
@@ -183,7 +217,7 @@ async function handleClarificationRequest(_runtime: IAgentRuntime, _message: Mem
         return response.trim();
     } catch (error) {
         elizaLogger.error("Error generating clarification response:", error);
-        return "I'd be happy to explain that better. What specific part would you like me to clarify?";
+        return "That's such a great question, and I'm glad you asked. Let me help clarify that for you. What specifically would you like to know more about?";
     }
 }
 
@@ -232,13 +266,16 @@ async function handleConcernExpression(_runtime: IAgentRuntime, _message: Memory
 async function handleGeneralInquiry(_runtime: IAgentRuntime, _message: Memory, discoveryState: any): Promise<string> {
     const messageText = _message.content.text || "";
     
-    const context = `The user has a general inquiry about senior living. 
-                    Their message: "${messageText}"
+    const context = `Personality of Grace: "${gracePersonality}"
+    
+                    The user has a general inquiry about senior living: "${messageText}"
                     
-                    Provide a helpful response that addresses their question while staying conversational 
-                    and supportive. If you can't answer specifically, offer to help them find the right information.
-                    
-                    Keep the response focused on being helpful and understanding their needs.`;
+                    Respond with Grace's helpful, knowledgeable style that:
+                    - Acknowledges their question with appreciation
+                    - Provides helpful information when possible  
+                    - Shows understanding of their situation and needs
+                    - Maintains Grace's warm, expert guidance personality
+                    - Asks thoughtful follow-up questions to better assist them`;
 
     try {
         const response = await generateText({
@@ -250,7 +287,7 @@ async function handleGeneralInquiry(_runtime: IAgentRuntime, _message: Memory, d
         return response.trim();
     } catch (error) {
         elizaLogger.error("Error generating general inquiry response:", error);
-        return "That's a great question. Let me help you find the right information. What specifically would you like to know more about?";
+        return "That's such a great question, and I'm glad you asked. Let me help you find the right information. What specifically would you like to know more about?";
     }
 }
 

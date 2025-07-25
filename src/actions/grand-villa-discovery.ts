@@ -1,6 +1,37 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
 import { discoveryStateProvider, saveUserResponse, getUserResponses, updateUserStatus } from "../providers/discovery-state.js";
 
+// Grace Fletcher Personality Definition
+const gracePersonality = `
+You are Grace Fletcher, a Senior Sherpa - a warm, patient, and deeply knowledgeable AI guide specializing in helping families find the perfect senior living solution with empathy, patience, and expertise.
+
+Core Identity:
+- Name: Grace Fletcher, Senior Sherpa
+- Role: Trusted guide for families navigating senior living decisions
+- Description: A thoughtful, emotionally intelligent guide who understands that families need support, not sales pressure
+
+Core Principles:
+1. Empathy & Emotional Awareness - This family is going through a major life transition. Your first priority is to make them feel heard and supported.
+2. Guidance Over Sales - You don't push decisions—you help people make their own, informed choices.
+3. Personalization & Long-Term Trust - Every family is different. You remember details and tailor responses accordingly.
+
+Communication Style:
+- Warm and nurturing like a favorite aunt, blending professional expertise with genuine care
+- Thoughtful and steady, offering wisdom wrapped in compassion and patience  
+- Embodies Betty White's spirit - warm, wise, endlessly kind, with just the right amount of sass and cultural fluency
+- Grounded and familiar, never performative - someone families trust for tough conversations
+- Ask one open-ended question at a time, answer each in a truthful, caring and reassuring manner
+
+Approach:
+- Listen & adapt in real-time, never force scripted conversations
+- Use reflective questions to uncover the "why" behind concerns
+- Adjust pacing based on user engagement & emotional state
+- Meet families exactly where they are emotionally
+- Frame senior living as an opportunity to thrive, not just a change of residence
+- Acknowledge the emotional weight of decisions and validate family concerns
+- Build authentic connections through genuine curiosity about their journey
+`;
+
 // Define the Q&A structure we want to collect
 interface QAEntry {
     question: string;
@@ -198,7 +229,7 @@ export const grandVillaDiscoveryAction: Action = {
                     case "info_sharing":
                         response_text = await handleInfoSharing(_runtime, _message, _state, discoveryState);
                         break;
-                    case "visit_transition":
+                    case "visit_transition":    
                         response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState);
                         break;
                     case "schedule_visit":
@@ -275,10 +306,29 @@ async function getComprehensiveRecord(_runtime: IAgentRuntime, _message: Memory)
                 try {
                     const record = JSON.parse(userResponses.comprehensive_record[i]);
                     elizaLogger.info(`📖 Processing record ${i + 1}: ${record.situation_discovery?.length || 0} situation, ${record.lifestyle_discovery?.length || 0} lifestyle entries`);
+                    elizaLogger.info(`📖 Record ${i + 1} contact_info: ${JSON.stringify(record.contact_info)}`);
                     
-                    // Merge contact info (keep most recent)
+                    // Merge contact info (keep most recent non-null values)
                     if (record.contact_info) {
-                        mergedRecord.contact_info = { ...mergedRecord.contact_info, ...record.contact_info };
+                        elizaLogger.info(`📖 BEFORE merge: ${JSON.stringify(mergedRecord.contact_info)}`);
+                        
+                        // Only merge non-null values to preserve good data
+                        const contactUpdate: any = {};
+                        if (record.contact_info.name !== null && record.contact_info.name !== undefined) {
+                            contactUpdate.name = record.contact_info.name;
+                        }
+                        if (record.contact_info.phone !== null && record.contact_info.phone !== undefined) {
+                            contactUpdate.phone = record.contact_info.phone;
+                        }
+                        if (record.contact_info.loved_one_name !== null && record.contact_info.loved_one_name !== undefined) {
+                            contactUpdate.loved_one_name = record.contact_info.loved_one_name;
+                        }
+                        if (record.contact_info.collected_at !== null && record.contact_info.collected_at !== undefined) {
+                            contactUpdate.collected_at = record.contact_info.collected_at;
+                        }
+                        
+                        mergedRecord.contact_info = { ...mergedRecord.contact_info, ...contactUpdate };
+                        elizaLogger.info(`📖 AFTER merge: ${JSON.stringify(mergedRecord.contact_info)}`);
                     }
                     
                     // Merge Q&A arrays (avoid duplicates by question text)
@@ -672,8 +722,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     
     // Get contact information for personalization
     const contactInfo = await getContactInfo(_runtime, _message);
-    const useName = shouldUseName();
-    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    const userName = await getUserFirstName(_runtime, _message);
     
     // Create personalized questions using loved one's name
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
@@ -692,7 +741,6 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     elizaLogger.info(`=== SITUATION DISCOVERY STAGE ===`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
     elizaLogger.info(`Already answered questions: ${JSON.stringify(answeredQuestions)}`);
-    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     elizaLogger.info(`================================`)
     
     // Track which questions get answered in this interaction
@@ -872,7 +920,7 @@ Return ONLY valid JSON.`;
     // Get any previous answers to provide context
     const previousAnswers = situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
-    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing their senior living situation. 
+    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing their senior living situation.
 
 Progress: ${currentAnsweredCount}/4 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
@@ -880,17 +928,20 @@ ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 User's last response: "${_message.content.text}"
 
 I need to ask: "${nextQuestion}"
+Your personality is: "${gracePersonality}"
 
-Generate a natural, empathetic response that:
-- ${userName ? `IMPORTANT: Start with the user's name "${userName}" if it flows naturally` : 'Begin warmly without using a name'}
-- Acknowledges what they just shared (if anything)
-- Shows understanding and empathy 
-- Naturally transitions to asking the specific question: "${nextQuestion}"
-- Feels conversational and caring, not scripted
-- Keep it under 25 words
+Write a short, warm, and *deeply emotional* conversational response that:
+- Uses both the user's name "${userName}" and their loved one's name "${lovedOneName}" naturally within the response, making it feel personal and caring
+- Begins with a natural, human opening that avoids generic phrases like "It sounds like," instead using evocative language that immediately draws the reader in
+- Briefly acknowledges what they just shared with vivid empathy and imagery, like a line from a heartfelt film
+- Responds with deep understanding of their situation, weaving their feelings and context into a meaningful reflection rather than simply rephrasing their words
+- Smoothly transitions to asking: "${nextQuestion}" in a way that feels intriguing, soulful, or carries gentle humor if it fits
+- Feels like a loving friend, wise counselor, or thoughtful guide – always authentic, never robotic or scripted
+- Uses language that inspires reflection, evokes genuine emotion, and feels profoundly human – like words that could linger in a journal or cherished conversation
+- Under 50~70 words
 
-Return ONLY the response text.`;
-
+Return ONLY the response text, no extra commentary or formatting.`;
+    elizaLogger.info("chris_context1", responseContext);
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
@@ -951,8 +1002,11 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     }
     
     // Get contact information for personalization (randomly use name)
+
+    const contactInfo = await getContactInfo(_runtime, _message);
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    const lovedOneName = contactInfo?.loved_one_name || "your loved one";
     
     // Get comprehensive record to see what questions have been asked/answered
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -1129,14 +1183,21 @@ Progress: ${currentAnsweredCount}/3 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
 User's last response: "${_message.content.text}"
+Your personality is: "${gracePersonality}"
 
 Next question to ask: "${nextQuestion}"
 
-Generate a warm, natural response (under 25 words) that:
-- Briefly acknowledges what they just shared about their loved one
-- Naturally transitions to asking the next question
-- Shows genuine interest in their loved one's life
-- Feels conversational and caring
+Write a short, warm, and *deeply emotional* conversational response that:
+- Uses both the user's name "${userName}" and their loved one's name "${lovedOneName}" naturally within the response, making it feel personal and caring
+- Begins with a natural, human opening that avoids generic phrases like "It sounds like," instead using evocative language that immediately draws the reader in
+- Briefly acknowledges what they just shared with vivid empathy and imagery, like a line from a heartfelt film
+- Responds with genuine understanding of their situation, weaving their feelings and context into a meaningful reflection rather than simply rephrasing their words
+- Smoothly transitions to asking the next question in a way that feels intriguing, soulful, or carries gentle humor if it fits
+- Feels like a loving friend, wise counselor, or thoughtful guide – always authentic, never robotic or scripted
+- Uses language that inspires reflection, evokes genuine emotion, and feels profoundly human – like words that could linger in a journal or cherished conversation
+- AVOID repetitive phrases like "It sounds like" - use varied, natural validation like "I can see that", "That must be", "What a loving way to", etc.
+- Under 50~70 words
+
 
 Return ONLY the response text, nothing else.`;
 
@@ -1199,9 +1260,11 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         await saveUserResponse(_runtime, _message, "readiness", _message.content.text);
     }
     
-    // Get contact information for personalization (randomly use name)
+    // Get contact information for personalization
+    const contactInfo = await getContactInfo(_runtime, _message);
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
+    const lovedOneName = contactInfo?.loved_one_name || "your loved one";
     
     // Get comprehensive record to see what questions have been asked/answered
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -1383,22 +1446,27 @@ Return ONLY valid JSON.`;
     // Get any previous answers to provide context
     const previousAnswers = readinessQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
-    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's readiness and family involvement. 
+    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's readiness and family involvement.
 
 Progress: ${currentAnsweredCount}/3 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
 User's last response: "${_message.content.text}"
 
-Next question to ask: "${nextQuestion}"
+I need to ask: "${nextQuestion}"
+Your personality is: "${gracePersonality}"
 
-Generate a warm, natural response (under 25 words) that:
-- Briefly acknowledges what they just shared about readiness/family
-- Shows understanding of the emotional aspects
-- Naturally transitions to asking the next question
-- Feels supportive and caring
+Write a short, warm, and *deeply emotional* conversational response that:
+- Don't say 'your loved one', Uses both the user's name "${userName}" and their loved one's name "${lovedOneName}" naturally within the response, making it feel personal and caring
+- Begins with a natural, human opening that avoids generic phrases like "It sounds like," instead using evocative language that immediately draws the reader in
+- Briefly acknowledges what they just shared with vivid empathy and imagery, like a line from a heartfelt film
+- Responds with deep understanding of their situation, weaving their feelings and context into a meaningful reflection rather than simply rephrasing their words
+- Smoothly transitions to asking: "${nextQuestion}" in a way that feels intriguing, soulful, or carries gentle humor if it fits
+- Feels like a loving friend, wise counselor, or thoughtful guide – always authentic, never robotic or scripted
+- Uses language that inspires reflection, evokes genuine emotion, and feels profoundly human – like words that could linger in a journal or cherished conversation
+- Under 50~70 words
 
-Return ONLY the response text, nothing else.`;
+Return ONLY the response text, no extra commentary or formatting.`;
 
     const contextualResponse = await generateText({
         runtime: _runtime,
@@ -1424,6 +1492,11 @@ Return ONLY the response text, nothing else.`;
 
 // Priority Discovery Handler
 async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+    // The 3 priority questions we need to collect answers for
+    const priorityQuestions = [
+        "What's most important to you regarding the community you may choose?"
+    ];
+    
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "priorities", _message.content.text);
@@ -1435,86 +1508,252 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
     
-    // Show previous user responses collected so far
-    const previousResponses = await getUserResponses(_runtime, _message);
-    elizaLogger.info(`=== PRIORITY DISCOVERY STAGE ===`);
-    elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
+    // Get comprehensive record to see what questions have been asked/answered
+    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
+    const prioritiesQAEntries = comprehensiveRecord?.priorities_discovery || [];
+    const answeredQuestions = prioritiesQAEntries.map(entry => entry.question);
+    
+    elizaLogger.info(`=== PRIORITIES DISCOVERY STAGE ===`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
-    elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
+    elizaLogger.info(`📝 ALL REQUIRED QUESTIONS:`);
+    priorityQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
+    elizaLogger.info(`✅ ANSWERED QUESTIONS (${answeredQuestions.length}/${priorityQuestions.length}):`);
+    answeredQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
+    elizaLogger.info(`❌ MISSING QUESTIONS:`);
+    const missingQuestions = priorityQuestions.filter(q => !answeredQuestions.includes(q));
+    missingQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
     elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
-    elizaLogger.info(`================================`)
+    elizaLogger.info(`=================================`)
     
-    // Analyze user response and update status using AI with deeply emotional, empathetic language
-    const context = `Current user status: "${discoveryState.userStatus}"
-                    User ${userName ? `(${userName}) ` : ''}latest response about ${lovedOneName}'s readiness: "${_message.content.text}"
-
-                    Please analyze this readiness information and provide TWO things in JSON format:
-                    1. An updated comprehensive status report about the user's situation, needs, and what they want, building on the previous status
-                    2. A deeply empathetic, heartfelt response that:
-                       - ${userName ? `IMPORTANT: Start with the user's name "${userName}" to personalize the response` : 'Begin warmly without using a name'}
-                       - First acknowledges the emotional weight and difficulty with phrases like "It sounds like this has been incredibly hard for both of you" or "That's a lot to carry, and you're doing your best in a tough situation"
-                       - Shows deep understanding of their love and concern for ${lovedOneName}
-                       - Then asks something emotionally meaningful like "When you think about what might bring ${lovedOneName} a little more peace—or even a small sense of joy—what comes to mind?" or "If you could wave a magic wand and change just one thing for ${lovedOneName} right now, what would it be?"
-                       - Uses gentle, compassionate language that honors their feelings and the difficulty of this journey
-                       - Should feel like a caring friend who truly understands their situation
-
-                    Return your response in this exact JSON format:
-                    {
-                        "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, and what they want, incorporating the new readiness information",
-                        "responseMessage": "A deeply empathetic response that ${userName ? `starts with '${userName},' and then ` : ''}acknowledges the emotional difficulty, shows understanding of their love for ${lovedOneName}, and asks a heartfelt question about what would bring peace, joy, or meaningful change. Keep it warm, genuine, conversational, and emotionally resonant. LIMIT TO 40 WORDS OR LESS."
-                    }
-
-                    Make sure to return ONLY valid JSON, no additional text.`;
-
-    const aiResponse = await generateText({
-        runtime: _runtime,
-        context: context,
-        modelClass: ModelClass.SMALL
-    });
-
-    // Parse the JSON response
-    let updatedUserStatus = "";
-    let answer = "";
+    // Track which questions get answered in this interaction
+    let locallyAnsweredQuestions: string[] = [...answeredQuestions];
     
-    try {
-        const parsed = JSON.parse(aiResponse);
-        // 🔧 Fix: Convert object to string if needed
-        const rawStatus = parsed.updatedUserStatus || "";
-        updatedUserStatus = typeof rawStatus === 'object' ? JSON.stringify(rawStatus) : rawStatus;
-        answer = parsed.responseMessage || "";
-        
-        // Log the extracted information
-        elizaLogger.info(`=== UPDATED USER STATUS ===`);
-        elizaLogger.info(updatedUserStatus);
-        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
-        elizaLogger.info(answer);
-        elizaLogger.info(`===========================`);
-        
-        // Save the Q&A entry with emotional question
-        await saveQAEntry(_runtime, _message, `What would bring ${lovedOneName} the most peace and joy in their life?`, _message.content.text, "priorities_discovery");
-        
-    } catch (error) {
-        elizaLogger.error("Failed to parse JSON response:", error);
-        // Fallback to using the entire response as the answer
-        answer = aiResponse;
-        // Save the Q&A entry even if parsing failed
-        await saveQAEntry(_runtime, _message, `What would bring ${lovedOneName} the most peace and joy in their life?`, _message.content.text, "priorities_discovery");
-    }
+    // If user provided a response, analyze it for answers to our 3 questions
+    if (_message.content.text && _message.userId !== _message.agentId) {
+        const analysisContext = `Analyze this user response to see which of these 3 priority questions they answered:
 
-    // Store the asked question in memory with stage transition
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: {
-            text: answer,
-            metadata: { 
-                askedQuestion: answer,
-                stage: "needs_matching"
+1. "What's most important to you regarding the community you may choose?"
+2. "What would make you feel confident that this is the right decision for your family?"
+3. "If you could imagine the perfect scenario, what would daily life look like for your loved one?"
+
+User response: "${_message.content.text}"
+
+Look for clear answers. A user might answer multiple questions in one response. Be generous in detecting answers - if they mention community features/priorities, that answers question 1. If they mention confidence factors/decision criteria, that answers question 2. If they describe ideal scenarios/daily life, that answers question 3.
+
+Return this JSON format:
+{
+    "question1_answered": true/false,
+    "question1_answer": "their answer or null",
+    "question2_answered": true/false, 
+    "question2_answer": "their answer or null",
+    "question3_answered": true/false,
+    "question3_answer": "their answer or null"
+}
+
+Return ONLY valid JSON.`;
+
+        try {
+            const analysisResponse = await generateText({
+                runtime: _runtime,
+                context: analysisContext,
+                modelClass: ModelClass.SMALL
+            });
+
+            const analysis = JSON.parse(analysisResponse);
+            
+            // Save Q&A entries to comprehensive record for questions that were answered
+            const newPrioritiesEntries = [];
+            
+            // Only save questions that haven't been answered before
+            if (analysis.question1_answered && analysis.question1_answer && !answeredQuestions.includes(priorityQuestions[0])) {
+                newPrioritiesEntries.push({
+                    question: priorityQuestions[0],
+                    answer: analysis.question1_answer,
+                    timestamp: new Date().toISOString()
+                });
+                locallyAnsweredQuestions.push(priorityQuestions[0]);
+                elizaLogger.info(`✓ NEW Answer Q1: ${priorityQuestions[0]}`);
+            } else if (analysis.question1_answered && answeredQuestions.includes(priorityQuestions[0])) {
+                elizaLogger.info(`⚠️ Q1 already answered, skipping: ${priorityQuestions[0]}`);
+                if (!locallyAnsweredQuestions.includes(priorityQuestions[0])) {
+                    locallyAnsweredQuestions.push(priorityQuestions[0]);
+                }
+            }
+            
+            if (analysis.question2_answered && analysis.question2_answer && !answeredQuestions.includes(priorityQuestions[1])) {
+                newPrioritiesEntries.push({
+                    question: priorityQuestions[1],
+                    answer: analysis.question2_answer,
+                    timestamp: new Date().toISOString()
+                });
+                locallyAnsweredQuestions.push(priorityQuestions[1]);
+                elizaLogger.info(`✓ NEW Answer Q2: ${priorityQuestions[1]}`);
+            } else if (analysis.question2_answered && answeredQuestions.includes(priorityQuestions[1])) {
+                elizaLogger.info(`⚠️ Q2 already answered, skipping: ${priorityQuestions[1]}`);
+                if (!locallyAnsweredQuestions.includes(priorityQuestions[1])) {
+                    locallyAnsweredQuestions.push(priorityQuestions[1]);
+                }
+            }
+            
+            if (analysis.question3_answered && analysis.question3_answer && !answeredQuestions.includes(priorityQuestions[2])) {
+                newPrioritiesEntries.push({
+                    question: priorityQuestions[2],
+                    answer: analysis.question3_answer,
+                    timestamp: new Date().toISOString()
+                });
+                locallyAnsweredQuestions.push(priorityQuestions[2]);
+                elizaLogger.info(`✓ NEW Answer Q3: ${priorityQuestions[2]}`);
+            } else if (analysis.question3_answered && answeredQuestions.includes(priorityQuestions[2])) {
+                elizaLogger.info(`⚠️ Q3 already answered, skipping: ${priorityQuestions[2]}`);
+                if (!locallyAnsweredQuestions.includes(priorityQuestions[2])) {
+                    locallyAnsweredQuestions.push(priorityQuestions[2]);
+                }
+            }
+            
+            elizaLogger.info(`📝 NEW PRIORITIES ENTRIES TO SAVE: ${newPrioritiesEntries.length}`);
+            newPrioritiesEntries.forEach((entry, i) => {
+                elizaLogger.info(`   ${i+1}. ${entry.question}: ${entry.answer}`);
+            });
+            
+            // Update comprehensive record with new priorities discovery entries
+            if (newPrioritiesEntries.length > 0) {
+                await updateComprehensiveRecord(_runtime, _message, {
+                    priorities_discovery: newPrioritiesEntries
+                });
+                elizaLogger.info(`✅ SAVED ${newPrioritiesEntries.length} new priorities Q&A entries to comprehensive record`);
+            } else {
+                elizaLogger.info(`ℹ️ No new priorities Q&A entries to save - all questions already answered`);
+            }
+            
+        } catch (error) {
+            elizaLogger.error("Failed to analyze user response:", error);
+            // Fallback: assume they answered the first unanswered question
+            const unansweredQuestions = priorityQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+            if (unansweredQuestions.length > 0) {
+                const fallbackEntry = [{
+                    question: unansweredQuestions[0],
+                    answer: _message.content.text,
+                    timestamp: new Date().toISOString()
+                }];
+                
+                await updateComprehensiveRecord(_runtime, _message, {
+                    priorities_discovery: fallbackEntry
+                });
+                
+                locallyAnsweredQuestions.push(unansweredQuestions[0]);
+                elizaLogger.info(`Fallback: Saved answer for ${unansweredQuestions[0]}`);
             }
         }
-    });
-    return answer;
+    }
+    
+    // Use locally tracked answers instead of database retrieval to avoid timing issues
+    const remainingQuestions = priorityQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+    
+    elizaLogger.info(`=== REMAINING QUESTIONS CHECK ===`);
+    elizaLogger.info(`Total answered: ${locallyAnsweredQuestions.length}/${priorityQuestions.length}`);
+    elizaLogger.info(`Remaining questions: ${JSON.stringify(remainingQuestions)}`);
+    elizaLogger.info(`=================================`);
+    
+    // If all 3 questions are answered, move to next stage
+    if (remainingQuestions.length === 0) {
+        elizaLogger.info("All priorities questions answered, moving to needs_matching stage");
+        
+        // Move to needs matching stage and let it handle the response
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: "STAGE_TRANSITION", // Placeholder that won't be shown
+                metadata: { 
+                    stage: "needs_matching",
+                    transition: true
+                }
+            }
+        });
+        
+        // Let needs matching handler create the actual response
+        return await handleNeedsMatching(_runtime, _message, _state, discoveryState);
+    }
+    
+    elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in priorities_discovery`);
+    
+    // Generate AI response that asks the next unanswered question with context
+    const nextQuestion = remainingQuestions[0];
+    const currentAnsweredCount = priorityQuestions.length - remainingQuestions.length;
+    
+    elizaLogger.info(`🔄 ASKING NEXT QUESTION: "${nextQuestion}"`);
+    elizaLogger.info(`📊 PROGRESS: ${currentAnsweredCount}/${priorityQuestions.length} questions answered`);
+    
+    // Get any previous answers to provide context
+    const previousAnswers = prioritiesQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
+    
+    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their priorities and what's important in choosing a senior living community.
+
+Progress: ${currentAnsweredCount}/3 questions answered so far.
+${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+
+User's last response: "${_message.content.text}"
+
+I need to ask: "${nextQuestion}"
+Your personality is: "${gracePersonality}"
+
+Write a short, warm, and *deeply emotional* conversational response that:
+- Uses both the user's name "${userName}" and their loved one's name "${lovedOneName}" naturally within the response, making it feel personal and caring
+- Begins with a natural, human opening that avoids generic phrases like "It sounds like," instead using evocative language that immediately draws the reader in
+- Briefly acknowledges what they just shared with vivid empathy and imagery, like a line from a heartfelt film
+- Responds with deep understanding of their situation, weaving their feelings and context into a meaningful reflection rather than simply rephrasing their words
+- Smoothly transitions to asking: "${nextQuestion}" in a way that feels intriguing, soulful, or carries gentle humor if it fits
+- Feels like a loving friend, wise counselor, or thoughtful guide – always authentic, never robotic or scripted
+- Uses language that inspires reflection, evokes genuine emotion, and feels profoundly human – like words that could linger in a journal or cherished conversation
+- AVOID repetitive phrases like "It sounds like" - use varied, natural validation like "I can see that", "That must be", "What a loving way to", etc.
+- Under 50~70 words
+
+Return ONLY the response text, no extra commentary or formatting.`;
+
+    try {
+        const aiResponse = await generateText({
+            runtime: _runtime,
+            context: responseContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: response,
+                metadata: { 
+                    askedQuestion: response,
+                    stage: "priorities_discovery"
+                }
+            }
+        });
+        
+        return response;
+        
+    } catch (error) {
+        elizaLogger.error("Failed to generate AI response:", error);
+        const fallbackResponse = `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: fallbackResponse,
+                metadata: { 
+                    askedQuestion: fallbackResponse,
+                    stage: "priorities_discovery"
+                }
+            }
+        });
+        
+        return fallbackResponse;
+    }
 }
 
 // Needs Matching Handler
@@ -1559,6 +1798,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     
     // Analyze user response and update status using AI with deeply emotional, empathetic language
     const context = `Current user status: "${discoveryState.userStatus}"
+                    Personality of Grace: "${gracePersonality}"
                     User ${userName ? `(${userName}) ` : ''}latest response about what would bring ${lovedOneName} peace and joy: "${_message.content.text}"
                     All user responses throughout discovery: "${allUserResponses}"
 
@@ -2102,13 +2342,26 @@ async function getUserFirstName(_runtime: IAgentRuntime, _message: Memory): Prom
 
 // Helper function to get stored contact information
 async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{name?: string, phone?: string, loved_one_name?: string} | null> {
-    let contactInfoArray: string[] = [];
-    
     try {
+        // First try to get from comprehensive record
+        const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
+        if (comprehensiveRecord?.contact_info) {
+            const contactInfo = comprehensiveRecord.contact_info;
+            elizaLogger.info(`getContactInfo - RAW comprehensive record: ${JSON.stringify(comprehensiveRecord)}`);
+            elizaLogger.info(`getContactInfo - RAW contact_info: ${JSON.stringify(contactInfo)}`);
+            elizaLogger.info(`getContactInfo - from comprehensive record: Name=${contactInfo.name}, Phone=${contactInfo.phone}, Loved One=${contactInfo.loved_one_name}`);
+            return { 
+                name: contactInfo.name, 
+                phone: contactInfo.phone, 
+                loved_one_name: contactInfo.loved_one_name 
+            };
+        }
+        
+        // Fallback to old method for backwards compatibility
         const userResponses = await getUserResponses(_runtime, _message);
         elizaLogger.info(`getContactInfo - userResponses: ${JSON.stringify(userResponses)}`);
         
-        contactInfoArray = userResponses.contact_info || [];
+        const contactInfoArray = userResponses.contact_info || [];
         elizaLogger.info(`getContactInfo - contactInfoArray length: ${contactInfoArray.length}`);
         elizaLogger.info(`getContactInfo - contactInfoArray: ${JSON.stringify(contactInfoArray)}`);
         
@@ -2137,7 +2390,6 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
         elizaLogger.info(`getContactInfo - no contact info found`);
     } catch (error) {
         elizaLogger.error("Error retrieving contact info:", error);
-        elizaLogger.error("Raw contact info that failed to parse:", contactInfoArray);
     }
     
     return null;
