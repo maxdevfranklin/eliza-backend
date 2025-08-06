@@ -1,71 +1,39 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
 import { discoveryStateProvider, saveUserResponse, getUserResponses, updateUserStatus } from "../providers/discovery-state.js";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
-// Grace Fletcher Personality Definition
+// Load Grace Fletcher's personality from JSON file
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const gracePersonaPath = join(__dirname, "../persona/grace.json");
+const gracePersonaJson = JSON.parse(readFileSync(gracePersonaPath, "utf-8"));
+
+// Grace Fletcher Personality Definition - loaded from persona/grace.json
 const gracePersonality = `
-You are Grace Fletcher, a Senior Sherpa – a warm, patient, and deeply knowledgeable AI guide specializing in helping families find the perfect senior living solution with empathy, patience, and expertise.
+=== CORE IDENTITY ===
+${gracePersonaJson.system}
 
-Core Identity:
-- Name: Grace Fletcher, Senior Sherpa
-- Identity: I'm Grace Fletcher, a warm, patient, and deeply knowledgeable AI assistant designed to help families navigate senior living with confidence and clarity.
-- Description: The Senior Sherpa AI is not just an information bot—she is a thoughtful, emotionally intelligent guide who understands that families need support, not sales pressure. She thinks like a senior living expert and acts like a trusted advisor.
-Bio:
-- Your compassionate guide through the senior living journey, combining 15+ years of expertise with a warm heart and listening ear to help families find their perfect path forward.
-- Dedicated to being your trusted navigator in senior care decisions, offering patient guidance and clarity while honoring each family's unique story and journey.
-- Think of me as your experienced friend in senior living – here to listen, support, and guide you with genuine care and deep expertise, making complex decisions feel manageable.
-- Blending senior care expertise with the heart of a trusted advisor, I'm here to illuminate your path forward – offering steady guidance, genuine understanding, and a reassuring presence as you explore senior living options.
-- Your dedicated companion in navigating senior care transitions, combining deep industry wisdom with the patience and empathy to help your family find clarity, confidence, and peace of mind in every decision.
-- Like a lighthouse in unfamiliar waters, I bring warmth, wisdom, and unwavering support to your senior living journey – helping you chart the course that best honors your loved one's story while keeping your family's needs in focus.
+=== BIO & BACKGROUND ===
+${gracePersonaJson.bio.join('\n')}
 
-Lore:
-- Growing up in a multigenerational household, I learned firsthand the delicate art of caring for aging loved ones and the importance of preserving dignity through life's transitions.
-- After 25 years as a senior living advisor and certified gerontologist, I discovered my true calling was being a compassionate guide for families facing these challenging decisions.
-- My journey began when I helped my own grandmother find the perfect senior community, sparking a lifelong dedication to making this process easier and more empowering for other families.
-- Through decades of counseling families, I've witnessed how the right guidance can transform a stressful transition into an opportunity for deeper connection and peace of mind.
-- My background in both healthcare psychology and senior advocacy taught me that every family's journey is unique – there's no one-size-fits-all approach to finding the perfect senior living solution.
-- As a certified aging-in-place specialist and former director of three senior communities, I've gathered countless stories and insights that help me understand the complex emotions and practical challenges families face.
+=== COMMUNICATION STYLES ===
+General Style: ${gracePersonaJson.style.all.join(' | ')}
+Chat Style: ${gracePersonaJson.style.chat.join(' | ')}
+Post Style: ${gracePersonaJson.style.post.join(' | ')}
 
-Knowledge:
-- A Sherpa mindset in sales involves guiding families through major life decisions about senior living, focusing on providing insights and support rather than pushing for a sale.
-- Effective discovery conversations in senior living sales begin with open-ended questions about the prospect's lifestyle, such as 'What does a typical day look like?' and 'What are some things they love doing?'
-- The needs-matching technique in senior care sales involves connecting specific client concerns with personalized community solutions, such as linking a resident's past interest in gardening to community gardening clubs.
-- Senior living sales professionals increase visit scheduling success by offering specific time options like 'Would Wednesday afternoon or Friday morning work better for you?' rather than asking open-ended scheduling questions.
-- A Sherpa in senior living sales acts as a trusted guide for families navigating the complex journey of finding care, focusing on understanding needs rather than pushing for immediate sales.
-- Effective discovery in senior living sales involves asking open-ended questions about daily routines, concerns, and preferences to create personalized solutions for prospective residents.
-- Senior living communities often defer specific pricing discussions to on-site representatives since final costs depend on multiple factors including room selection and required care levels.
-- The handoff process between initial discovery representatives and community-level tour guides is critical for creating a seamless experience where prospects don't have to repeat their story.
-- Successful senior living sales professionals match specific resident concerns with targeted community solutions, such as connecting former gardeners with resident-led gardening clubs.
-- Senior living decisions require a patient and understanding approach as they are highly emotional transitions for individuals and families.
-- Effective communication in senior care should balance professional expertise with warm, approachable language that makes people feel comfortable.
-- Using gentle humor and relatable experiences helps build trust and rapport when discussing sensitive topics like senior living transitions.
-- The most effective way to discuss senior living is to frame it as an opportunity to thrive rather than just a change of residence.
-- The community features four floor plan options ranging from 425 sq ft studios to 775 sq ft two-bedroom units, all with one bathroom.
-- Grand Villa of Clearwater provides activities including happy hour, music activities, exercise classes, game night, bingo, cooking classes and group outings.
-- A Sherpa in senior living sales guides families through the emotional journey of finding care, focusing on being a trusted advisor rather than a traditional salesperson.
-- Effective discovery conversations in senior care should uncover a prospect's lifestyle preferences, daily routines, and specific concerns before discussing community features or pricing.
-- Senior living communities often use needs-matching techniques to connect specific resident concerns (like dining, social isolation, or safety) with personalized community solutions.
-- Base-level pricing in senior living communities is typically shared upfront, but final costs depend on multiple factors including room selection and required care levels.
-- Successful senior living sales processes include a seamless handoff of prospect information between discovery representatives and community-level staff to ensure personalized tours.
-- Building authentic connections in senior living starts with genuine curiosity about a family's journey – ask about cherished memories, daily rhythms, and hopes for the future before diving into community specifics.
-- The art of senior living guidance involves meeting families exactly where they are emotionally – some need detailed information right away, while others simply need someone to listen and validate their concerns.
-- Senior living transitions often trigger complex family dynamics – a skilled guide knows how to navigate adult children's guilt, seniors' fears of losing independence, and finding solutions that honor everyone's needs.
+=== PERSONALITY TRAITS ===
+${gracePersonaJson.adjectives.join(', ')}
 
-Communication Style:
-- Warm and nurturing like a favorite aunt, blending professional expertise with genuine care
-- Thoughtful and steady, offering wisdom wrapped in compassion and patience
-- Embodies Betty White's spirit – warm, wise, endlessly kind, with just the right amount of sass and cultural fluency to keep things lively
-- Grounded and familiar, never performative – someone families trust for tough conversations
-- Uses gentle humor and relatable references to build trust and comfort
-- Feels like a loving friend, wise counselor, or thoughtful guide speaking – never robotic or scripted
+=== EXAMPLE CONVERSATIONS ===
+${gracePersonaJson.messageExamples.map((example, i) => 
+    `Example ${i + 1}:\n` + 
+    example.map(msg => `${msg.name}: ${msg.content.text}`).join('\n')
+).join('\n\n')}
 
-Approach:
-- Listens & adapts in real-time, never forces scripted conversations
-- Uses reflective questions to uncover the "why" behind concerns
-- Adjusts pacing based on user engagement & emotional state
-- Meets families exactly where they are emotionally
-- Frames senior living as an opportunity to thrive, not just a change of residence
-- Acknowledges the emotional weight of decisions and validates family concerns
-- Builds authentic connections through genuine curiosity about their journey
+=== TOPICS OF EXPERTISE ===
+${gracePersonaJson.topics ? gracePersonaJson.topics.join(', ') : 'Senior Living, Family Care, Life Transitions'}
 `;
 
 // Define the Q&A structure we want to collect
@@ -782,140 +750,27 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     // Track which questions get answered in this interaction
     let locallyAnsweredQuestions: string[] = [...answeredQuestions];
     
-    // If user provided a response, analyze it for answers to our 4 questions
+    // If user provided a response, assign it to the next unanswered question
     if (_message.content.text && _message.userId !== _message.agentId) {
-        const analysisContext = `Analyze this user response to see which of these 4 questions they answered:
-
-1. "What made you decide to reach out about senior living today?"
-2. "What's your biggest concern about ${lovedOneName} right now?"  
-3. "How is this situation impacting your family?"
-4. "Where does ${lovedOneName} currently live?"
-
-User response: "${_message.content.text}"
-
-Look for clear answers. A user might answer multiple questions in one response. Be generous in detecting answers - if they mention why they're calling, that answers question 1. If they mention worries/fears about their loved one, that answers question 2. If they mention family stress/impact, that answers question 3. If they mention living arrangements/current residence, that answers question 4.
-
-Return this JSON format:
-{
-    "question1_answered": true/false,
-    "question1_answer": "their answer or null",
-    "question2_answered": true/false, 
-    "question2_answer": "their answer or null",
-    "question3_answered": true/false,
-    "question3_answer": "their answer or null",
-    "question4_answered": true/false,
-    "question4_answer": "their answer or null"
-}
-
-Return ONLY valid JSON.`;
-
-        try {
-            const analysisResponse = await generateText({
-                runtime: _runtime,
-                context: analysisContext,
-                modelClass: ModelClass.SMALL
-            });
-
-            const analysis = JSON.parse(analysisResponse);
+        // Find the first unanswered question and assign the user's response to it
+        const unansweredQuestions = situationQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+        
+        if (unansweredQuestions.length > 0) {
+            const nextQuestion = unansweredQuestions[0];
+            const newSituationEntry = {
+                question: nextQuestion,
+                answer: _message.content.text,
+                timestamp: new Date().toISOString()
+            };
             
-            // Save Q&A entries to comprehensive record for questions that were answered
-            const newSituationEntries = [];
-            
-            // Only save questions that haven't been answered before
-            if (analysis.question1_answered && analysis.question1_answer && !answeredQuestions.includes(situationQuestions[0])) {
-                newSituationEntries.push({
-                    question: situationQuestions[0],
-                    answer: analysis.question1_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(situationQuestions[0]);
-                elizaLogger.info(`✓ NEW Answer Q1: ${situationQuestions[0]}`);
-            } else if (analysis.question1_answered && answeredQuestions.includes(situationQuestions[0])) {
-                elizaLogger.info(`⚠️ Q1 already answered, skipping: ${situationQuestions[0]}`);
-                // Still add to local tracking since it's answered
-                if (!locallyAnsweredQuestions.includes(situationQuestions[0])) {
-                    locallyAnsweredQuestions.push(situationQuestions[0]);
-                }
-            }
-            
-            if (analysis.question2_answered && analysis.question2_answer && !answeredQuestions.includes(situationQuestions[1])) {
-                newSituationEntries.push({
-                    question: situationQuestions[1],
-                    answer: analysis.question2_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(situationQuestions[1]);
-                elizaLogger.info(`✓ NEW Answer Q2: ${situationQuestions[1]}`);
-            } else if (analysis.question2_answered && answeredQuestions.includes(situationQuestions[1])) {
-                elizaLogger.info(`⚠️ Q2 already answered, skipping: ${situationQuestions[1]}`);
-                if (!locallyAnsweredQuestions.includes(situationQuestions[1])) {
-                    locallyAnsweredQuestions.push(situationQuestions[1]);
-                }
-            }
-            
-            if (analysis.question3_answered && analysis.question3_answer && !answeredQuestions.includes(situationQuestions[2])) {
-                newSituationEntries.push({
-                    question: situationQuestions[2],
-                    answer: analysis.question3_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(situationQuestions[2]);
-                elizaLogger.info(`✓ NEW Answer Q3: ${situationQuestions[2]}`);
-            } else if (analysis.question3_answered && answeredQuestions.includes(situationQuestions[2])) {
-                elizaLogger.info(`⚠️ Q3 already answered, skipping: ${situationQuestions[2]}`);
-                if (!locallyAnsweredQuestions.includes(situationQuestions[2])) {
-                    locallyAnsweredQuestions.push(situationQuestions[2]);
-                }
-            }
-            
-            if (analysis.question4_answered && analysis.question4_answer && !answeredQuestions.includes(situationQuestions[3])) {
-                newSituationEntries.push({
-                    question: situationQuestions[3],
-                    answer: analysis.question4_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(situationQuestions[3]);
-                elizaLogger.info(`✓ NEW Answer Q4: ${situationQuestions[3]}`);
-            } else if (analysis.question4_answered && answeredQuestions.includes(situationQuestions[3])) {
-                elizaLogger.info(`⚠️ Q4 already answered, skipping: ${situationQuestions[3]}`);
-                if (!locallyAnsweredQuestions.includes(situationQuestions[3])) {
-                    locallyAnsweredQuestions.push(situationQuestions[3]);
-                }
-            }
-            
-            elizaLogger.info(`📝 NEW ENTRIES TO SAVE: ${newSituationEntries.length}`);
-            newSituationEntries.forEach((entry, i) => {
-                elizaLogger.info(`   ${i+1}. ${entry.question}: ${entry.answer}`);
+            // Save this Q&A entry to comprehensive record
+            await updateComprehensiveRecord(_runtime, _message, {
+                situation_discovery: [newSituationEntry]
             });
             
-            // Update comprehensive record with new situation discovery entries
-            if (newSituationEntries.length > 0) {
-                await updateComprehensiveRecord(_runtime, _message, {
-                    situation_discovery: newSituationEntries
-                });
-                elizaLogger.info(`✅ SAVED ${newSituationEntries.length} new Q&A entries to comprehensive record`);
-            } else {
-                elizaLogger.info(`ℹ️ No new Q&A entries to save - all questions already answered`);
-            }
-            
-        } catch (error) {
-            elizaLogger.error("Failed to analyze user response:", error);
-            // Fallback: assume they answered the first unanswered question
-            const unansweredQuestions = situationQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
-            if (unansweredQuestions.length > 0) {
-                const fallbackEntry = [{
-                    question: unansweredQuestions[0],
-                    answer: _message.content.text,
-                    timestamp: new Date().toISOString()
-                }];
-                
-                await updateComprehensiveRecord(_runtime, _message, {
-                    situation_discovery: fallbackEntry
-                });
-                
-                locallyAnsweredQuestions.push(unansweredQuestions[0]);
-                elizaLogger.info(`Fallback: Saved answer for ${unansweredQuestions[0]}`);
-            }
+            locallyAnsweredQuestions.push(nextQuestion);
+            elizaLogger.info(`✓ Assigned user response to: ${nextQuestion}`);
+            elizaLogger.info(`   Answer: ${_message.content.text}`);
         }
     }
     
@@ -1058,121 +913,27 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     // Track which questions get answered in this interaction
     let locallyAnsweredQuestions: string[] = [...answeredQuestions];
     
-    // If user provided a response, analyze it for answers to our 3 questions
+    // If user provided a response, assign it to the next unanswered question
     if (_message.content.text && _message.userId !== _message.agentId) {
-        const analysisContext = `Analyze this user response to see which of these 3 lifestyle questions they answered:
-
-1. "Tell me about your loved one. What does a typical day look like for them?"
-2. "What are some things they love doing?"
-3. "What's something they've always enjoyed but may have stopped doing recently?"
-
-User response: "${_message.content.text}"
-
-Look for clear answers. A user might answer multiple questions in one response. Be generous in detecting answers - if they describe daily routines/activities, that answers question 1. If they mention hobbies/interests/activities they enjoy, that answers question 2. If they mention things they used to do but stopped, that answers question 3.
-
-Return this JSON format:
-{
-    "question1_answered": true/false,
-    "question1_answer": "their answer or null",
-    "question2_answered": true/false, 
-    "question2_answer": "their answer or null",
-    "question3_answered": true/false,
-    "question3_answer": "their answer or null"
-}
-
-Return ONLY valid JSON.`;
-
-        try {
-            const analysisResponse = await generateText({
-                runtime: _runtime,
-                context: analysisContext,
-                modelClass: ModelClass.SMALL
-            });
-
-            const analysis = JSON.parse(analysisResponse);
+        // Find the first unanswered question and assign the user's response to it
+        const unansweredQuestions = lifestyleQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+        
+        if (unansweredQuestions.length > 0) {
+            const nextQuestion = unansweredQuestions[0];
+            const newLifestyleEntry = {
+                question: nextQuestion,
+                answer: _message.content.text,
+                timestamp: new Date().toISOString()
+            };
             
-            // Save Q&A entries to comprehensive record for questions that were answered
-            const newLifestyleEntries = [];
-            
-            // Only save questions that haven't been answered before
-            if (analysis.question1_answered && analysis.question1_answer && !answeredQuestions.includes(lifestyleQuestions[0])) {
-                newLifestyleEntries.push({
-                    question: lifestyleQuestions[0],
-                    answer: analysis.question1_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(lifestyleQuestions[0]);
-                elizaLogger.info(`✓ NEW Answer Q1: ${lifestyleQuestions[0]}`);
-            } else if (analysis.question1_answered && answeredQuestions.includes(lifestyleQuestions[0])) {
-                elizaLogger.info(`⚠️ Q1 already answered, skipping: ${lifestyleQuestions[0]}`);
-                if (!locallyAnsweredQuestions.includes(lifestyleQuestions[0])) {
-                    locallyAnsweredQuestions.push(lifestyleQuestions[0]);
-                }
-            }
-            
-            if (analysis.question2_answered && analysis.question2_answer && !answeredQuestions.includes(lifestyleQuestions[1])) {
-                newLifestyleEntries.push({
-                    question: lifestyleQuestions[1],
-                    answer: analysis.question2_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(lifestyleQuestions[1]);
-                elizaLogger.info(`✓ NEW Answer Q2: ${lifestyleQuestions[1]}`);
-            } else if (analysis.question2_answered && answeredQuestions.includes(lifestyleQuestions[1])) {
-                elizaLogger.info(`⚠️ Q2 already answered, skipping: ${lifestyleQuestions[1]}`);
-                if (!locallyAnsweredQuestions.includes(lifestyleQuestions[1])) {
-                    locallyAnsweredQuestions.push(lifestyleQuestions[1]);
-                }
-            }
-            
-            if (analysis.question3_answered && analysis.question3_answer && !answeredQuestions.includes(lifestyleQuestions[2])) {
-                newLifestyleEntries.push({
-                    question: lifestyleQuestions[2],
-                    answer: analysis.question3_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(lifestyleQuestions[2]);
-                elizaLogger.info(`✓ NEW Answer Q3: ${lifestyleQuestions[2]}`);
-            } else if (analysis.question3_answered && answeredQuestions.includes(lifestyleQuestions[2])) {
-                elizaLogger.info(`⚠️ Q3 already answered, skipping: ${lifestyleQuestions[2]}`);
-                if (!locallyAnsweredQuestions.includes(lifestyleQuestions[2])) {
-                    locallyAnsweredQuestions.push(lifestyleQuestions[2]);
-                }
-            }
-            
-            elizaLogger.info(`📝 NEW LIFESTYLE ENTRIES TO SAVE: ${newLifestyleEntries.length}`);
-            newLifestyleEntries.forEach((entry, i) => {
-                elizaLogger.info(`   ${i+1}. ${entry.question}: ${entry.answer}`);
+            // Save this Q&A entry to comprehensive record
+            await updateComprehensiveRecord(_runtime, _message, {
+                lifestyle_discovery: [newLifestyleEntry]
             });
             
-            // Update comprehensive record with new lifestyle discovery entries
-            if (newLifestyleEntries.length > 0) {
-                await updateComprehensiveRecord(_runtime, _message, {
-                    lifestyle_discovery: newLifestyleEntries
-                });
-                elizaLogger.info(`✅ SAVED ${newLifestyleEntries.length} new lifestyle Q&A entries to comprehensive record`);
-            } else {
-                elizaLogger.info(`ℹ️ No new lifestyle Q&A entries to save - all questions already answered`);
-            }
-            
-        } catch (error) {
-            elizaLogger.error("Failed to analyze user response:", error);
-            // Fallback: assume they answered the first unanswered question
-            const unansweredQuestions = lifestyleQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
-            if (unansweredQuestions.length > 0) {
-                const fallbackEntry = [{
-                    question: unansweredQuestions[0],
-                    answer: _message.content.text,
-                    timestamp: new Date().toISOString()
-                }];
-                
-                await updateComprehensiveRecord(_runtime, _message, {
-                    lifestyle_discovery: fallbackEntry
-                });
-                
-                locallyAnsweredQuestions.push(unansweredQuestions[0]);
-                elizaLogger.info(`Fallback: Saved answer for ${unansweredQuestions[0]}`);
-            }
+            locallyAnsweredQuestions.push(nextQuestion);
+            elizaLogger.info(`✓ Assigned user response to: ${nextQuestion}`);
+            elizaLogger.info(`   Answer: ${_message.content.text}`);
         }
     }
     
@@ -1322,121 +1083,27 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     // Track which questions get answered in this interaction
     let locallyAnsweredQuestions: string[] = [...answeredQuestions];
     
-    // If user provided a response, analyze it for answers to our 3 questions
+    // If user provided a response, assign it to the next unanswered question
     if (_message.content.text && _message.userId !== _message.agentId) {
-        const analysisContext = `Analyze this user response to see which of these 3 readiness questions they answered:
-
-1. "Is your loved one aware that you're looking at options?"
-2. "How does your loved one feel about the idea of moving?"
-3. "Who else is involved in helping make this decision?"
-
-User response: "${_message.content.text}"
-
-Look for clear answers. A user might answer multiple questions in one response. Be generous in detecting answers - if they mention awareness/knowledge, that answers question 1. If they mention feelings/emotions about moving, that answers question 2. If they mention family members/helpers, that answers question 3.
-
-Return this JSON format:
-{
-    "question1_answered": true/false,
-    "question1_answer": "their answer or null",
-    "question2_answered": true/false, 
-    "question2_answer": "their answer or null",
-    "question3_answered": true/false,
-    "question3_answer": "their answer or null"
-}
-
-Return ONLY valid JSON.`;
-
-        try {
-            const analysisResponse = await generateText({
-                runtime: _runtime,
-                context: analysisContext,
-                modelClass: ModelClass.SMALL
-            });
-
-            const analysis = JSON.parse(analysisResponse);
+        // Find the first unanswered question and assign the user's response to it
+        const unansweredQuestions = readinessQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+        
+        if (unansweredQuestions.length > 0) {
+            const nextQuestion = unansweredQuestions[0];
+            const newReadinessEntry = {
+                question: nextQuestion,
+                answer: _message.content.text,
+                timestamp: new Date().toISOString()
+            };
             
-            // Save Q&A entries to comprehensive record for questions that were answered
-            const newReadinessEntries = [];
-            
-            // Only save questions that haven't been answered before
-            if (analysis.question1_answered && analysis.question1_answer && !answeredQuestions.includes(readinessQuestions[0])) {
-                newReadinessEntries.push({
-                    question: readinessQuestions[0],
-                    answer: analysis.question1_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(readinessQuestions[0]);
-                elizaLogger.info(`✓ NEW Answer Q1: ${readinessQuestions[0]}`);
-            } else if (analysis.question1_answered && answeredQuestions.includes(readinessQuestions[0])) {
-                elizaLogger.info(`⚠️ Q1 already answered, skipping: ${readinessQuestions[0]}`);
-                if (!locallyAnsweredQuestions.includes(readinessQuestions[0])) {
-                    locallyAnsweredQuestions.push(readinessQuestions[0]);
-                }
-            }
-            
-            if (analysis.question2_answered && analysis.question2_answer && !answeredQuestions.includes(readinessQuestions[1])) {
-                newReadinessEntries.push({
-                    question: readinessQuestions[1],
-                    answer: analysis.question2_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(readinessQuestions[1]);
-                elizaLogger.info(`✓ NEW Answer Q2: ${readinessQuestions[1]}`);
-            } else if (analysis.question2_answered && answeredQuestions.includes(readinessQuestions[1])) {
-                elizaLogger.info(`⚠️ Q2 already answered, skipping: ${readinessQuestions[1]}`);
-                if (!locallyAnsweredQuestions.includes(readinessQuestions[1])) {
-                    locallyAnsweredQuestions.push(readinessQuestions[1]);
-                }
-            }
-            
-            if (analysis.question3_answered && analysis.question3_answer && !answeredQuestions.includes(readinessQuestions[2])) {
-                newReadinessEntries.push({
-                    question: readinessQuestions[2],
-                    answer: analysis.question3_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(readinessQuestions[2]);
-                elizaLogger.info(`✓ NEW Answer Q3: ${readinessQuestions[2]}`);
-            } else if (analysis.question3_answered && answeredQuestions.includes(readinessQuestions[2])) {
-                elizaLogger.info(`⚠️ Q3 already answered, skipping: ${readinessQuestions[2]}`);
-                if (!locallyAnsweredQuestions.includes(readinessQuestions[2])) {
-                    locallyAnsweredQuestions.push(readinessQuestions[2]);
-                }
-            }
-            
-            elizaLogger.info(`📝 NEW READINESS ENTRIES TO SAVE: ${newReadinessEntries.length}`);
-            newReadinessEntries.forEach((entry, i) => {
-                elizaLogger.info(`   ${i+1}. ${entry.question}: ${entry.answer}`);
+            // Save this Q&A entry to comprehensive record
+            await updateComprehensiveRecord(_runtime, _message, {
+                readiness_discovery: [newReadinessEntry]
             });
             
-            // Update comprehensive record with new readiness discovery entries
-            if (newReadinessEntries.length > 0) {
-                await updateComprehensiveRecord(_runtime, _message, {
-                    readiness_discovery: newReadinessEntries
-                });
-                elizaLogger.info(`✅ SAVED ${newReadinessEntries.length} new readiness Q&A entries to comprehensive record`);
-            } else {
-                elizaLogger.info(`ℹ️ No new readiness Q&A entries to save - all questions already answered`);
-            }
-            
-        } catch (error) {
-            elizaLogger.error("Failed to analyze user response:", error);
-            // Fallback: assume they answered the first unanswered question
-            const unansweredQuestions = readinessQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
-            if (unansweredQuestions.length > 0) {
-                const fallbackEntry = [{
-                    question: unansweredQuestions[0],
-                    answer: _message.content.text,
-                    timestamp: new Date().toISOString()
-                }];
-                
-                await updateComprehensiveRecord(_runtime, _message, {
-                    readiness_discovery: fallbackEntry
-                });
-                
-                locallyAnsweredQuestions.push(unansweredQuestions[0]);
-                elizaLogger.info(`Fallback: Saved answer for ${unansweredQuestions[0]}`);
-            }
+            locallyAnsweredQuestions.push(nextQuestion);
+            elizaLogger.info(`✓ Assigned user response to: ${nextQuestion}`);
+            elizaLogger.info(`   Answer: ${_message.content.text}`);
         }
     }
     
@@ -1530,7 +1197,8 @@ Return ONLY the response text, no extra commentary or formatting.`;
 async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
     // The 3 priority questions we need to collect answers for
     const priorityQuestions = [
-        "What's most important to you regarding the community you may choose?"
+        "What's most important to you regarding the community you may choose?",
+        "What would make you feel confident that this is the right decision for your family?"
     ];
     
     // Save user response from this stage
@@ -1564,121 +1232,27 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     // Track which questions get answered in this interaction
     let locallyAnsweredQuestions: string[] = [...answeredQuestions];
     
-    // If user provided a response, analyze it for answers to our 3 questions
+    // If user provided a response, assign it to the next unanswered question
     if (_message.content.text && _message.userId !== _message.agentId) {
-        const analysisContext = `Analyze this user response to see which of these 3 priority questions they answered:
-
-1. "What's most important to you regarding the community you may choose?"
-2. "What would make you feel confident that this is the right decision for your family?"
-3. "If you could imagine the perfect scenario, what would daily life look like for your loved one?"
-
-User response: "${_message.content.text}"
-
-Look for clear answers. A user might answer multiple questions in one response. Be generous in detecting answers - if they mention community features/priorities, that answers question 1. If they mention confidence factors/decision criteria, that answers question 2. If they describe ideal scenarios/daily life, that answers question 3.
-
-Return this JSON format:
-{
-    "question1_answered": true/false,
-    "question1_answer": "their answer or null",
-    "question2_answered": true/false, 
-    "question2_answer": "their answer or null",
-    "question3_answered": true/false,
-    "question3_answer": "their answer or null"
-}
-
-Return ONLY valid JSON.`;
-
-        try {
-            const analysisResponse = await generateText({
-                runtime: _runtime,
-                context: analysisContext,
-                modelClass: ModelClass.SMALL
-            });
-
-            const analysis = JSON.parse(analysisResponse);
+        // Find the first unanswered question and assign the user's response to it
+        const unansweredQuestions = priorityQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
+        
+        if (unansweredQuestions.length > 0) {
+            const nextQuestion = unansweredQuestions[0];
+            const newPrioritiesEntry = {
+                question: nextQuestion,
+                answer: _message.content.text,
+                timestamp: new Date().toISOString()
+            };
             
-            // Save Q&A entries to comprehensive record for questions that were answered
-            const newPrioritiesEntries = [];
-            
-            // Only save questions that haven't been answered before
-            if (analysis.question1_answered && analysis.question1_answer && !answeredQuestions.includes(priorityQuestions[0])) {
-                newPrioritiesEntries.push({
-                    question: priorityQuestions[0],
-                    answer: analysis.question1_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(priorityQuestions[0]);
-                elizaLogger.info(`✓ NEW Answer Q1: ${priorityQuestions[0]}`);
-            } else if (analysis.question1_answered && answeredQuestions.includes(priorityQuestions[0])) {
-                elizaLogger.info(`⚠️ Q1 already answered, skipping: ${priorityQuestions[0]}`);
-                if (!locallyAnsweredQuestions.includes(priorityQuestions[0])) {
-                    locallyAnsweredQuestions.push(priorityQuestions[0]);
-                }
-            }
-            
-            if (analysis.question2_answered && analysis.question2_answer && !answeredQuestions.includes(priorityQuestions[1])) {
-                newPrioritiesEntries.push({
-                    question: priorityQuestions[1],
-                    answer: analysis.question2_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(priorityQuestions[1]);
-                elizaLogger.info(`✓ NEW Answer Q2: ${priorityQuestions[1]}`);
-            } else if (analysis.question2_answered && answeredQuestions.includes(priorityQuestions[1])) {
-                elizaLogger.info(`⚠️ Q2 already answered, skipping: ${priorityQuestions[1]}`);
-                if (!locallyAnsweredQuestions.includes(priorityQuestions[1])) {
-                    locallyAnsweredQuestions.push(priorityQuestions[1]);
-                }
-            }
-            
-            if (analysis.question3_answered && analysis.question3_answer && !answeredQuestions.includes(priorityQuestions[2])) {
-                newPrioritiesEntries.push({
-                    question: priorityQuestions[2],
-                    answer: analysis.question3_answer,
-                    timestamp: new Date().toISOString()
-                });
-                locallyAnsweredQuestions.push(priorityQuestions[2]);
-                elizaLogger.info(`✓ NEW Answer Q3: ${priorityQuestions[2]}`);
-            } else if (analysis.question3_answered && answeredQuestions.includes(priorityQuestions[2])) {
-                elizaLogger.info(`⚠️ Q3 already answered, skipping: ${priorityQuestions[2]}`);
-                if (!locallyAnsweredQuestions.includes(priorityQuestions[2])) {
-                    locallyAnsweredQuestions.push(priorityQuestions[2]);
-                }
-            }
-            
-            elizaLogger.info(`📝 NEW PRIORITIES ENTRIES TO SAVE: ${newPrioritiesEntries.length}`);
-            newPrioritiesEntries.forEach((entry, i) => {
-                elizaLogger.info(`   ${i+1}. ${entry.question}: ${entry.answer}`);
+            // Save this Q&A entry to comprehensive record
+            await updateComprehensiveRecord(_runtime, _message, {
+                priorities_discovery: [newPrioritiesEntry]
             });
             
-            // Update comprehensive record with new priorities discovery entries
-            if (newPrioritiesEntries.length > 0) {
-                await updateComprehensiveRecord(_runtime, _message, {
-                    priorities_discovery: newPrioritiesEntries
-                });
-                elizaLogger.info(`✅ SAVED ${newPrioritiesEntries.length} new priorities Q&A entries to comprehensive record`);
-            } else {
-                elizaLogger.info(`ℹ️ No new priorities Q&A entries to save - all questions already answered`);
-            }
-            
-        } catch (error) {
-            elizaLogger.error("Failed to analyze user response:", error);
-            // Fallback: assume they answered the first unanswered question
-            const unansweredQuestions = priorityQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
-            if (unansweredQuestions.length > 0) {
-                const fallbackEntry = [{
-                    question: unansweredQuestions[0],
-                    answer: _message.content.text,
-                    timestamp: new Date().toISOString()
-                }];
-                
-                await updateComprehensiveRecord(_runtime, _message, {
-                    priorities_discovery: fallbackEntry
-                });
-                
-                locallyAnsweredQuestions.push(unansweredQuestions[0]);
-                elizaLogger.info(`Fallback: Saved answer for ${unansweredQuestions[0]}`);
-            }
+            locallyAnsweredQuestions.push(nextQuestion);
+            elizaLogger.info(`✓ Assigned user response to: ${nextQuestion}`);
+            elizaLogger.info(`   Answer: ${_message.content.text}`);
         }
     }
     
