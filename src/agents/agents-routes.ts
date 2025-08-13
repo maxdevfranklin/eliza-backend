@@ -69,7 +69,17 @@ export class AgentsRoutes {
         if (!allowed.has(key)) continue;
         idx++;
         setClauses.push(`${key.includes('"') ? key : `"${key}"`} = $${idx}`);
-        values.push(value);
+        
+        // Handle different data types properly
+        let processedValue = value;
+        if (typeof value === 'object' && value !== null) {
+          // Serialize objects and arrays to JSON for database storage
+          processedValue = JSON.stringify(value);
+        } else {
+          elizaLogger.info(`@chris:agent personality update successfully`);
+        }
+        
+        values.push(processedValue);
       }
 
       if (setClauses.length === 0) {

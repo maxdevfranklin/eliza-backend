@@ -115,6 +115,7 @@ export class AuthServer {
         const urlObj = new URL(req.url || '/', `http://${req.headers.host}`);
         const name = urlObj.searchParams.get('name') || 'GraceFletcher';
         const body = await this.parseBody(req);
+        elizaLogger.info(`Name update request body: ${body}`);
         const result = await this.agentsRoutes.handleUpdateByName(name, body || {});
         this.sendJsonResponse(res, result.status, result.data);
         return true;
