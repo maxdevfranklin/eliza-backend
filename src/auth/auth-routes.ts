@@ -18,6 +18,11 @@ export class AuthRoutes {
     this.initializeUserDatabase();
   }
 
+  // Getter method to access runtime
+  getRuntime(): IAgentRuntime {
+    return this.runtime;
+  }
+
   private async initializeUserDatabase() {
     try {
       await this.userDb.initialize();
