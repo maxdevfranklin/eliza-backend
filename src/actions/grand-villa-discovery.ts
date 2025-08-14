@@ -870,7 +870,12 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         });
         
         // Let lifestyle discovery handler create the actual response
-        return await handleLifestyleQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
+        // Create a new message object without user content to avoid processing the previous response
+        const transitionMessage = {
+            ..._message,
+            content: { text: "" }
+        };
+        return await handleLifestyleQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
     }
     
     // Generate AI response that asks the next unanswered question with context
@@ -943,7 +948,6 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     // The 3 basic lifestyle questions we need to collect answers for
     const lifestyleQuestions = [
         "Tell me about your loved one. What does a typical day look like for them?",
-        "What are some things they love doing?", 
         "What's something they've always enjoyed but may have stopped doing recently?"
     ];
     
@@ -1024,7 +1028,12 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         });
         
         // Let readiness discovery handler create the actual response
-        return await handleReadinessQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
+        // Create a new message object without user content to avoid processing the previous response
+        const transitionMessage = {
+            ..._message,
+            content: { text: "" }
+        };
+        return await handleReadinessQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
     }
     
     // Determine which question to ask next and generate a contextual response
@@ -1183,7 +1192,12 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         });
         
         // Let priorities discovery handler create the actual response
-        return await handlePriorityQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
+        // Create a new message object without user content to avoid processing the previous response
+        const transitionMessage = {
+            ..._message,
+            content: { text: "" }
+        };
+        return await handlePriorityQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
     }
     
     elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in readiness_discovery`);
@@ -1323,7 +1337,12 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         });
         
         // Let needs matching handler create the actual response
-        return await handleNeedsMatching(_runtime, _message, _state, discoveryState, gracePersonality);
+        // Create a new message object without user content to avoid processing the previous response
+        const transitionMessage = {
+            ..._message,
+            content: { text: "" }
+        };
+        return await handleNeedsMatching(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
     }
     
     elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in priorities_discovery`);
