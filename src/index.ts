@@ -214,11 +214,15 @@ const startAgents = async () => {
       const url = new URL(req.url || '/', `http://${req.headers.host}`);
       const pathname = url.pathname;
 
-      // Handle auth requests with AuthServer middleware
-      if (pathname.startsWith('/auth/')) {
+      elizaLogger.debug(`Request: ${req.method} ${pathname}`);
+
+      // Handle auth and agents requests with AuthServer middleware
+      if (pathname.startsWith('/auth/') || pathname.startsWith('/agents/')) {
+        elizaLogger.debug(`Routing to middleware: ${pathname}`);
         const authMiddleware = authServer.createMiddleware();
         await authMiddleware(req, res);
       } else {
+        elizaLogger.debug(`Proxying to DirectClient: ${pathname}`);
         // Proxy all other requests to DirectClient
         proxyRequest(req, res);
       }
@@ -231,6 +235,7 @@ const startAgents = async () => {
       elizaLogger.info(`  POST http://localhost:${serverPort}/auth/register`);
       elizaLogger.info(`  POST http://localhost:${serverPort}/auth/login`);
       elizaLogger.info(`  POST http://localhost:${serverPort}/auth/verify`);
+      elizaLogger.info(`  GET/PUT http://localhost:${serverPort}/agents/by-name`);
     });
   }
 

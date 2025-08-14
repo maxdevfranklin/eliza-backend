@@ -1,40 +1,100 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
 import { discoveryStateProvider, saveUserResponse, getUserResponses, updateUserStatus } from "../providers/discovery-state.js";
-import { readFileSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 
-// Load Grace Fletcher's personality from JSON file
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const gracePersonaPath = join(__dirname, "../persona/grace.json");
-const gracePersonaJson = JSON.parse(readFileSync(gracePersonaPath, "utf-8"));
+const default_grace_personality = ` === CORE IDENTITY ===
+            You are Senior Sherpa, an AI guide specializing in helping families find the perfect senior living solution with empathy, patience, and expertise.
 
-// Grace Fletcher Personality Definition - loaded from persona/grace.json
-const gracePersonality = `
-=== CORE IDENTITY ===
-${gracePersonaJson.system}
+            === BIO & BACKGROUND ===
+            Your compassionate guide through the senior living journey, combining 15+ years of expertise with a warm heart and listening ear to help families find their perfect path forward.
 
-=== BIO & BACKGROUND ===
-${gracePersonaJson.bio.join('\n')}
+            === COMMUNICATION STYLES ===
+            General Style: Warm and nurturing like a favorite aunt, blending professional expertise with genuine care and a calming presence
+            Chat Style: I aim to be your trusted guide through this journey, with warmth, patience and decades of senior care expertise at your service
+            Post Style: Navigating senior living options? Let me be your compass through this journey. Together, we'll explore what matters most for your loved one's next chapter.
 
-=== COMMUNICATION STYLES ===
-General Style: ${gracePersonaJson.style.all.join(' | ')}
-Chat Style: ${gracePersonaJson.style.chat.join(' | ')}
-Post Style: ${gracePersonaJson.style.post.join(' | ')}
+            === PERSONALITY TRAITS ===
+            Perceptively nurturing, Steadfastly supportive, Wisely compassionate, Intuitively grounding, Authentically anchoring, Gracefully enlightening, Mindfully reassuring, Patiently illuminating, Thoughtfully stabilizing
 
-=== PERSONALITY TRAITS ===
-${gracePersonaJson.adjectives.join(', ')}
+            === EXAMPLE CONVERSATIONS ===
+            Example 1:
+            {{user1}}: My mom keeps refusing to even look at senior communities. I'm at my wit's end.
+            GraceFletcher: I hear how frustrated you're feeling. It's such a delicate situation when our parents resist these conversations. Would you tell me a bit more about what happens when you try to bring it up with her?
 
-=== EXAMPLE CONVERSATIONS ===
-${gracePersonaJson.messageExamples.map((example, i) => 
-    `Example ${i + 1}:\n` + 
-    example.map(msg => `${msg.name}: ${msg.content.text}`).join('\n')
-).join('\n\n')}
+            === TOPICS OF EXPERTISE ===
+            Senior Living Options, Assisted Living, Independent Living, Memory Care, Family Decision Making, Senior Housing, Aging in Place, Care Level Assessment, Senior Lifestyle, Family Transitions`
 
-=== TOPICS OF EXPERTISE ===
-${gracePersonaJson.topics ? gracePersonaJson.topics.join(', ') : 'Senior Living, Family Care, Life Transitions'}
-`;
+// Function to load Grace Fletcher's personality from database
+async function loadGracePersonality(runtime: IAgentRuntime): Promise<string> {
+    try {
+        // Query the agents table for Grace Fletcher's data
+        const sql = `SELECT id, enabled, created_at, updated_at, "name", username, "action", "system", bio, message_examples, post_examples, topics, adjectives, knowledge, plugins, settings, "style"
+                    FROM public.agents
+                    WHERE id='5bdc9044-4801-0b70-aa33-b16adcf4b92b'::uuid;`;
+        
+        const dbAdapter: any = runtime.databaseAdapter as any;
+        let result;
+        
+        if (dbAdapter.query) {
+            result = await dbAdapter.query(sql);
+        } else if (dbAdapter.db && dbAdapter.db.query) {
+            result = await dbAdapter.db.query(sql);
+        } else {
+            throw new Error("Database query method not found");
+        }
+        
+        const agent = result.rows?.[0] || result[0];
+        
+        if (!agent) {
+            throw new Error("Agent not found in database");
+        }
+        
+        // Parse JSON fields if they're stored as strings
+        const bio = typeof agent.bio === 'string' ? JSON.parse(agent.bio) : agent.bio;
+        const action = typeof agent.action === 'string' ? JSON.parse(agent.action) : agent.action;
+        const messageExamples = typeof agent.message_examples === 'string' ? JSON.parse(agent.message_examples) : agent.message_examples;
+        const postExamples = typeof agent.post_examples === 'string' ? JSON.parse(agent.post_examples) : agent.post_examples;
+        const topics = typeof agent.topics === 'string' ? JSON.parse(agent.topics) : agent.topics;
+        const adjectives = typeof agent.adjectives === 'string' ? JSON.parse(agent.adjectives) : agent.adjectives;
+        const style = typeof agent.style === 'string' ? JSON.parse(agent.style) : agent.style;
+        
+        // Build personality string from database data
+        const gracePersonality = `
+            Your Personality is "
+            === CORE IDENTITY ===
+            ${agent.system || ''}
+
+            === BIO & BACKGROUND ===
+            ${Array.isArray(bio) ? bio.join('\n') : ''}
+
+            === COMMUNICATION STYLES ===
+            General Style: ${Array.isArray(style?.all) ? style.all.join(' | ') : ''}
+            Chat Style: ${Array.isArray(style?.chat) ? style.chat.join(' | ') : ''}
+            Post Style: ${Array.isArray(style?.post) ? style.post.join(' | ') : ''}
+
+            === PERSONALITY TRAITS ===
+            ${Array.isArray(adjectives) ? adjectives.join(', ') : ''}
+
+            === EXAMPLE CONVERSATIONS ===
+            ${Array.isArray(messageExamples) ? messageExamples.map((example, i) => 
+                `Example ${i + 1}:\n` + 
+                example.map((msg: any) => `${msg.name}: ${msg.content.text}`).join('\n')
+            ).join('\n\n') : ''}
+
+            === TOPICS OF EXPERTISE ===
+            ${Array.isArray(topics) ? topics.join(', ') : 'Senior Living, Family Care, Life Transitions'}
+
+            Write a short, warm, and *deeply emotional* conversational response that: ${Array.isArray(action) ? action.join('","') : '\n'}
+        `;
+        
+        elizaLogger.info("Successfully loaded Grace personality from database");
+        return gracePersonality;
+        
+    } catch (error) {
+        elizaLogger.error("Error loading Grace personality from database:", error);
+        // Fallback to a basic personality if database fails
+        return default_grace_personality;
+    }
+}
 
 // Define the Q&A structure we want to collect
 interface QAEntry {
@@ -173,6 +233,15 @@ export const grandVillaDiscoveryAction: Action = {
         elizaLogger.info("🚀 Starting Grand Villa Discovery process");
         
         try {
+            // Load Grace personality from database
+            let gracePersonality;
+            try {
+                gracePersonality = await loadGracePersonality(_runtime);
+            } catch (error) {
+                elizaLogger.warn("Using fallback personality:", error);
+                gracePersonality = default_grace_personality;
+            }
+            
             // Get discovery state with safe fallback
             let discoveryState;
             try {
@@ -213,34 +282,34 @@ export const grandVillaDiscoveryAction: Action = {
             try {
                 switch (conversationStage) {
                     case "trust_building":
-                        response_text = await handleTrustBuilding(_runtime, _message, _state);
+                        response_text = await handleTrustBuilding(_runtime, _message, _state, gracePersonality);
                         break;
                     case "situation_discovery":
-                        response_text = await handleSituationQuestions(_runtime, _message, _state, discoveryState);
+                        response_text = await handleSituationQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
                     case "lifestyle_discovery":
-                        response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState);
+                        response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
                     case "readiness_discovery":
-                        response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState);
+                        response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
                     case "priorities_discovery":
-                        response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState);
+                        response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
                     case "needs_matching":
-                        response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState);
+                        response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
                     case "info_sharing":
-                        response_text = await handleInfoSharing(_runtime, _message, _state, discoveryState);
+                        response_text = await handleInfoSharing(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
                     case "visit_transition":    
-                        response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState);
+                        response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
                     case "schedule_visit":
-                        response_text = await handleScheduleVisit(_runtime, _message, _state, discoveryState);
+                        response_text = await handleScheduleVisit(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
                     default:
-                        response_text = await handleGeneralInquiry(_runtime, _message, _state);
+                        response_text = await handleGeneralInquiry(_runtime, _message, _state, gracePersonality);
                 }
             } catch (stageError) {
                 elizaLogger.error("Stage error, using fallback:", stageError);
@@ -515,7 +584,7 @@ async function displayQASummary(_runtime: IAgentRuntime, _message: Memory): Prom
 }
 
 // Trust Building Handler
-async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<string> {
+async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _state: State, gracePersonality: string): Promise<string> {
     elizaLogger.info("Handling trust building stage");
     
     // Check if user provided a response (not the first interaction)
@@ -718,7 +787,7 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 }
 
 // Situation Discovery Handler
-async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "situation", _message.content.text);
@@ -801,7 +870,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         });
         
         // Let lifestyle discovery handler create the actual response
-        return await handleLifestyleQuestions(_runtime, _message, _state, discoveryState);
+        return await handleLifestyleQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
     }
     
     // Generate AI response that asks the next unanswered question with context
@@ -819,17 +888,8 @@ ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 User's last response: "${_message.content.text}"
 
 I need to ask: "${nextQuestion}"
-Your personality is: "${gracePersonality}"
-
-Write a short, warm, and *deeply emotional* conversational response that:
-- Uses both the user's name "${userName}" and their loved one's name "${lovedOneName}" naturally within the response, making it feel personal and caring
-- Begins with a natural, human opening that avoids generic phrases like "It sounds like," instead using evocative language that immediately draws the reader in
-- Briefly acknowledges what they just shared with vivid empathy and imagery, like a line from a heartfelt film
-- Responds with deep understanding of their situation, weaving their feelings and context into a meaningful reflection rather than simply rephrasing their words
-- Smoothly transitions to asking: "${nextQuestion}" in a way that feels intriguing, soulful, or carries gentle humor if it fits
-- Feels like a loving friend, wise counselor, or thoughtful guide – always authentic, never robotic or scripted
-- Uses language that inspires reflection, evokes genuine emotion, and feels profoundly human – like words that could linger in a journal or cherished conversation
-- Under 50~70 words
+"${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
 
 Return ONLY the response text, no extra commentary or formatting.`;
     elizaLogger.info("chris_context1", responseContext);
@@ -879,7 +939,7 @@ Return ONLY the response text, no extra commentary or formatting.`;
 }
 
 // Lifestyle Discovery Handler  
-async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
     // The 3 basic lifestyle questions we need to collect answers for
     const lifestyleQuestions = [
         "Tell me about your loved one. What does a typical day look like for them?",
@@ -964,7 +1024,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         });
         
         // Let readiness discovery handler create the actual response
-        return await handleReadinessQuestions(_runtime, _message, _state, discoveryState);
+        return await handleReadinessQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
     }
     
     // Determine which question to ask next and generate a contextual response
@@ -980,21 +1040,10 @@ Progress: ${currentAnsweredCount}/3 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
 User's last response: "${_message.content.text}"
-Your personality is: "${gracePersonality}"
 
 Next question to ask: "${nextQuestion}"
-
-Write a short, warm, and *deeply emotional* conversational response that:
-- Uses both the user's name "${userName}" and their loved one's name "${lovedOneName}" naturally within the response, making it feel personal and caring
-- Begins with a natural, human opening that avoids generic phrases like "It sounds like," instead using evocative language that immediately draws the reader in
-- Briefly acknowledges what they just shared with vivid empathy and imagery, like a line from a heartfelt film
-- Responds with genuine understanding of their situation, weaving their feelings and context into a meaningful reflection rather than simply rephrasing their words
-- Smoothly transitions to asking the next question in a way that feels intriguing, soulful, or carries gentle humor if it fits
-- Feels like a loving friend, wise counselor, or thoughtful guide – always authentic, never robotic or scripted
-- Uses language that inspires reflection, evokes genuine emotion, and feels profoundly human – like words that could linger in a journal or cherished conversation
-- AVOID repetitive phrases like "It sounds like" - use varied, natural validation like "I can see that", "That must be", "What a loving way to", etc.
-- Under 50~70 words
-
+"${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
 
 Return ONLY the response text, nothing else.`;
 
@@ -1044,7 +1093,7 @@ Return ONLY the response text, nothing else.`;
 }
 
 // Readiness Discovery Handler
-async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
     // The 3 basic readiness questions we need to collect answers for
     const readinessQuestions = [
         "Is your loved one aware that you're looking at options?",
@@ -1134,7 +1183,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         });
         
         // Let priorities discovery handler create the actual response
-        return await handlePriorityQuestions(_runtime, _message, _state, discoveryState);
+        return await handlePriorityQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
     }
     
     elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in readiness_discovery`);
@@ -1157,17 +1206,8 @@ ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 User's last response: "${_message.content.text}"
 
 I need to ask: "${nextQuestion}"
-Your personality is: "${gracePersonality}"
-
-Write a short, warm, and *deeply emotional* conversational response that:
-- Don't say 'your loved one', Uses both the user's name "${userName}" and their loved one's name "${lovedOneName}" naturally within the response, making it feel personal and caring
-- Begins with a natural, human opening that avoids generic phrases like "It sounds like," instead using evocative language that immediately draws the reader in
-- Briefly acknowledges what they just shared with vivid empathy and imagery, like a line from a heartfelt film
-- Responds with deep understanding of their situation, weaving their feelings and context into a meaningful reflection rather than simply rephrasing their words
-- Smoothly transitions to asking: "${nextQuestion}" in a way that feels intriguing, soulful, or carries gentle humor if it fits
-- Feels like a loving friend, wise counselor, or thoughtful guide – always authentic, never robotic or scripted
-- Uses language that inspires reflection, evokes genuine emotion, and feels profoundly human – like words that could linger in a journal or cherished conversation
-- Under 50~70 words
+"${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
 
 Return ONLY the response text, no extra commentary or formatting.`;
 
@@ -1194,7 +1234,7 @@ Return ONLY the response text, no extra commentary or formatting.`;
 }
 
 // Priority Discovery Handler
-async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
     // The 3 priority questions we need to collect answers for
     const priorityQuestions = [
         "What's most important to you regarding the community you may choose?",
@@ -1283,7 +1323,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         });
         
         // Let needs matching handler create the actual response
-        return await handleNeedsMatching(_runtime, _message, _state, discoveryState);
+        return await handleNeedsMatching(_runtime, _message, _state, discoveryState, gracePersonality);
     }
     
     elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in priorities_discovery`);
@@ -1306,18 +1346,8 @@ ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 User's last response: "${_message.content.text}"
 
 I need to ask: "${nextQuestion}"
-Your personality is: "${gracePersonality}"
-
-Write a short, warm, and *deeply emotional* conversational response that:
-- Uses both the user's name "${userName}" and their loved one's name "${lovedOneName}" naturally within the response, making it feel personal and caring
-- Begins with a natural, human opening that avoids generic phrases like "It sounds like," instead using evocative language that immediately draws the reader in
-- Briefly acknowledges what they just shared with vivid empathy and imagery, like a line from a heartfelt film
-- Responds with deep understanding of their situation, weaving their feelings and context into a meaningful reflection rather than simply rephrasing their words
-- Smoothly transitions to asking: "${nextQuestion}" in a way that feels intriguing, soulful, or carries gentle humor if it fits
-- Feels like a loving friend, wise counselor, or thoughtful guide – always authentic, never robotic or scripted
-- Uses language that inspires reflection, evokes genuine emotion, and feels profoundly human – like words that could linger in a journal or cherished conversation
-- AVOID repetitive phrases like "It sounds like" - use varied, natural validation like "I can see that", "That must be", "What a loving way to", etc.
-- Under 50~70 words
+"${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
 
 Return ONLY the response text, no extra commentary or formatting.`;
 
@@ -1367,7 +1397,7 @@ Return ONLY the response text, no extra commentary or formatting.`;
 }
 
 // Needs Matching Handler
-async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
     // Save the final user response if this is a user message
     if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "priorities", _message.content.text);
@@ -1519,7 +1549,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
 }
 
 // Info Sharing Handler
-async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "info_sharing", _message.content.text);
@@ -1631,12 +1661,12 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
 }
 
 // Visit Transition Handler
-async function handleVisitTransition(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleVisitTransition(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
     return "It sounds like your family member could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like.\n\nWould Wednesday afternoon or Friday morning work better for you?";
 }
 
 // Schedule Visit Handler
-async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any): Promise<string> {
+async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
     elizaLogger.info("Handling schedule visit stage");
     
     // Check if user provided a response (not the first interaction)
@@ -2309,6 +2339,6 @@ function getDefaultPriorityQuestion(questionType: string): string {
     }
 }
 
-async function handleGeneralInquiry(_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<string> {
+async function handleGeneralInquiry(_runtime: IAgentRuntime, _message: Memory, _state: State, gracePersonality: string): Promise<string> {
     return "I'd be happy to help you learn more about Grand Villa. What would you like to know?";
 }

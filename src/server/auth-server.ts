@@ -2,13 +2,16 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { URL } from 'url';
 import { elizaLogger, IAgentRuntime } from "@elizaos/core";
 import { AuthRoutes } from '../auth/auth-routes.ts';
+import { AgentsRoutes } from '../agents/agents-routes.ts';
 
 export class AuthServer {
   private authRoutes: AuthRoutes;
+  private agentsRoutes: AgentsRoutes;
   private server: any;
 
   constructor(runtime: IAgentRuntime) {
     this.authRoutes = new AuthRoutes(runtime);
+    this.agentsRoutes = new AgentsRoutes(runtime);
   }
 
   // Parse JSON body from request
@@ -54,11 +57,10 @@ export class AuthServer {
     res.end(JSON.stringify(data));
   }
 
-  // Handle authentication requests
+  // Handle authentication and agents requests
   private async handleAuthRequest(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<boolean> {
     this.setCorsHeaders(res);
 
-    // Handle CORS preflight
     if (req.method === 'OPTIONS') {
       res.statusCode = 200;
       res.end();
@@ -66,6 +68,7 @@ export class AuthServer {
     }
 
     try {
+      // Auth endpoints
       if (pathname === '/auth/register' && req.method === 'POST') {
         const body = await this.parseBody(req);
         const result = await this.authRoutes.handleRegister(body);
@@ -83,12 +86,10 @@ export class AuthServer {
       if (pathname === '/auth/verify' && req.method === 'POST') {
         const body = await this.parseBody(req);
         const token = body.token || req.headers.authorization?.replace('Bearer ', '');
-        
         if (!token) {
           this.sendJsonResponse(res, 401, { success: false, message: 'Token required' });
           return true;
         }
-        
         const result = await this.authRoutes.handleVerifyToken(token);
         this.sendJsonResponse(res, result.status, result.data);
         return true;
@@ -101,19 +102,36 @@ export class AuthServer {
         return true;
       }
 
-      // If it's an auth route but not handled above, return 404
-      if (pathname.startsWith('/auth/')) {
-        this.sendJsonResponse(res, 404, { success: false, message: 'Endpoint not found' });
+      // Agents endpoints
+      if (pathname.startsWith('/agents/by-name') && req.method === 'GET') {
+        const urlObj = new URL(req.url || '/', `http://${req.headers.host}`);
+        const name = urlObj.searchParams.get('name') || 'GraceFletcher';
+        const result = await this.agentsRoutes.handleGetByName(name);
+        this.sendJsonResponse(res, result.status, result.data);
         return true;
       }
 
+      if (pathname.startsWith('/agents/by-name') && req.method === 'PUT') {
+        const urlObj = new URL(req.url || '/', `http://${req.headers.host}`);
+        const name = urlObj.searchParams.get('name') || 'GraceFletcher';
+        const body = await this.parseBody(req);
+        elizaLogger.info(`Name update request body: ${body}`);
+        const result = await this.agentsRoutes.handleUpdateByName(name, body || {});
+        this.sendJsonResponse(res, result.status, result.data);
+        return true;
+      }
+
+      if (pathname.startsWith('/auth/') || pathname.startsWith('/agents/')) {
+        this.sendJsonResponse(res, 404, { success: false, message: 'Endpoint not found' });
+        return true;
+      }
     } catch (error) {
-      elizaLogger.error('Auth request error:', error);
+      elizaLogger.error('Request error:', error);
       this.sendJsonResponse(res, 500, { success: false, message: 'Internal server error' });
       return true;
     }
 
-    return false; // Not an auth request
+    return false; // Not handled here
   }
 
   // Create middleware function that can be used with existing server
@@ -130,12 +148,10 @@ export class AuthServer {
     };
   }
 
-  // Get auth service for other components
   getAuthService() {
     return this.authRoutes.getAuthService();
   }
 
-  // Get user database for other components
   getUserDatabase() {
     return this.authRoutes.getUserDatabase();
   }
