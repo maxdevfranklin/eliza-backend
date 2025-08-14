@@ -28,7 +28,7 @@ export class AgentsRoutes {
 
   async handleGetByName(name: string): Promise<{ status: number; data: any }> {
     try {
-      const sql = `SELECT id, enabled, created_at, updated_at, "name", username, "system", bio, message_examples, post_examples, topics, adjectives, knowledge, plugins, settings, "style" FROM public.agents WHERE name = $1 LIMIT 1`;
+      const sql = `SELECT id, enabled, created_at, updated_at, "name", username, "action", "system", bio, message_examples, post_examples, topics, adjectives, knowledge, plugins, settings, "style" FROM public.agents WHERE name = $1 LIMIT 1`;
       const result = await this.query(sql, [name]);
       const row = result.rows?.[0] || result[0];
 
@@ -48,6 +48,7 @@ export class AgentsRoutes {
       // Allowed columns to update
       const allowed = new Set([
         "enabled",
+        "action",
         "system",
         "bio",
         "message_examples",
@@ -89,7 +90,7 @@ export class AgentsRoutes {
       // First parameter is name in WHERE clause
       values.unshift(name);
 
-      const sql = `UPDATE public.agents SET ${setClauses.join(", ")}, updated_at = NOW() WHERE name = $1 RETURNING id, enabled, created_at, updated_at, "name", username, "system", bio, message_examples, post_examples, topics, adjectives, knowledge, plugins, settings, "style"`;
+      const sql = `UPDATE public.agents SET ${setClauses.join(", ")}, updated_at = NOW() WHERE name = $1 RETURNING id, enabled, created_at, updated_at, "name", username, "action", "system", bio, message_examples, post_examples, topics, adjectives, knowledge, plugins, settings, "style"`;
       const result = await this.query(sql, values);
       const row = result.rows?.[0] || result[0];
 

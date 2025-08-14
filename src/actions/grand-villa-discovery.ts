@@ -889,6 +889,7 @@ User's last response: "${_message.content.text}"
 
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
 
 Return ONLY the response text, no extra commentary or formatting.`;
     elizaLogger.info("chris_context1", responseContext);
@@ -1042,6 +1043,7 @@ User's last response: "${_message.content.text}"
 
 Next question to ask: "${nextQuestion}"
 "${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
 
 Return ONLY the response text, nothing else.`;
 
@@ -1205,6 +1207,7 @@ User's last response: "${_message.content.text}"
 
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
 
 Return ONLY the response text, no extra commentary or formatting.`;
 
@@ -1344,6 +1347,7 @@ User's last response: "${_message.content.text}"
 
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
 
 Return ONLY the response text, no extra commentary or formatting.`;
 
