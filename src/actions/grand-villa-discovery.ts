@@ -311,6 +311,19 @@ export const grandVillaDiscoveryAction: Action = {
                     default:
                         response_text = await handleGeneralInquiry(_runtime, _message, _state, gracePersonality);
                 }
+                
+                // After running the stage handler, check if the stage has been updated
+                // Get the latest discovery state to see if stage changed
+                try {
+                    const updatedDiscoveryState = await discoveryStateProvider.get(_runtime, _message);
+                    if (updatedDiscoveryState.currentStage !== conversationStage) {
+                        elizaLogger.info(`🔄 Stage updated from ${conversationStage} to ${updatedDiscoveryState.currentStage}`);
+                        conversationStage = updatedDiscoveryState.currentStage;
+                    }
+                } catch (error) {
+                    elizaLogger.warn("Could not check for stage updates:", error);
+                }
+                
             } catch (stageError) {
                 elizaLogger.error("Stage error, using fallback:", stageError);
                 response_text = "I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.";
