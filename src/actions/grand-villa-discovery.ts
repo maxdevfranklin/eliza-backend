@@ -680,7 +680,7 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
                 
                 elizaLogger.info(`Contact info saved to comprehensive record`);
                 
-                // Move to next stage with personalized response
+                // Send transition message but stay in trust_building stage until user responds
                 const response = `Thank you, ${finalName}! I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.`;
                 
                 await _runtime.messageManager.createMemory({
@@ -690,12 +690,12 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
                     content: { 
                         text: response,
                         metadata: {
-                            stage: "situation_discovery"
+                            stage: "trust_building"
                         }
                     }
                 });
                 
-                elizaLogger.info(`Stored complete contact info and moving to situation_discovery`);
+                elizaLogger.info(`Stored complete contact info and sent transition message, staying in trust_building until user responds`);
                 return response;
             }
             
@@ -800,6 +800,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     // Create personalized questions using loved one's name
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
     const situationQuestions = [
+        "Move to the next step",
         "What made you decide to reach out about senior living today?",
         `What's your biggest concern about ${lovedOneName} right now?`, 
         "How is this situation impacting your family?",
@@ -1942,6 +1943,21 @@ async function determineConversationStage(_runtime: IAgentRuntime, _message: Mem
     const lastStage = lastAgentMessage?.content?.metadata ? (lastAgentMessage.content.metadata as { stage?: string }).stage : undefined;
     
     elizaLogger.info(`Last agent message stage: ${lastStage}`);
+    
+    // Check if we're in trust_building and should transition to situation_discovery
+    if (lastStage === "trust_building") {
+        // Check if we have complete contact information
+        const contactInfo = await getContactInfo(_runtime, _message);
+        if (contactInfo?.name && contactInfo?.phone && contactInfo?.loved_one_name) {
+            // Check if the last agent message was the transition message
+            const transitionMessage = `Thank you, ${contactInfo.name}! I'd be happy to get you the information you need, but before I do, do you mind if I ask a few quick questions? That way, I can really understand what's important and make sure I'm helping in the best way possible.`;
+            
+            if (lastAgentMessage?.content?.text === transitionMessage) {
+                elizaLogger.info(`Complete contact info collected and transition message sent, moving to situation_discovery`);
+                return "situation_discovery";
+            }
+        }
+    }
     
     // If we have a stage from the last agent message, use that
     if (lastStage) {
