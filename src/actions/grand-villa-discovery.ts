@@ -962,7 +962,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     // The 3 basic lifestyle questions we need to collect answers for
     const lifestyleQuestions = [
         "Tell me about your loved one. What does a typical day look like for them?",
-        "What's something they've always enjoyed but may have stopped doing recently?"
+        "What does he/she enjoy doing?"
     ];
     
     // Save user response from this stage
@@ -1332,7 +1332,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     elizaLogger.info(`Remaining questions: ${JSON.stringify(remainingQuestions)}`);
     elizaLogger.info(`=================================`);
     
-    // If all 3 questions are answered, move to next stage
+    // If all 2 questions are answered, move to next stage
     if (remainingQuestions.length === 0) {
         elizaLogger.info("All priorities questions answered, moving to needs_matching stage");
         
@@ -1373,7 +1373,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their priorities and what's important in choosing a senior living community.
 
-Progress: ${currentAnsweredCount}/3 questions answered so far.
+Progress: ${currentAnsweredCount}/2 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
 User's last response: "${_message.content.text}"
@@ -1431,9 +1431,12 @@ Return ONLY the response text, no extra commentary or formatting.`;
 
 // Needs Matching Handler
 async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
-    // Save the final user response if this is a user message
-    if (_message.content.text && _message.userId !== _message.agentId) {
-        await saveUserResponse(_runtime, _message, "priorities", _message.content.text);
+    // Check if this is a user response (not the initial transition)
+    const isUserResponse = _message.content.text && _message.userId !== _message.agentId;
+    
+    // Save the user response if this is a user message
+    if (isUserResponse) {
+        await saveUserResponse(_runtime, _message, "needs_matching", _message.content.text);
     }
     
     // Get all user responses from previous stages
@@ -1564,21 +1567,47 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         finalResponse = `${userName ? `${userName}, ` : ''}That's such a beautiful way to think about it—wanting to bring ${lovedOneName} peace and joy. It sounds like having a caring community around them could really make a difference. Grand Villa has that warm, supportive environment where residents truly feel at home. Would you like to visit and see how the community could embrace ${lovedOneName}?`;
     }
     
-    // Store the needs matching response in memory with stage transition
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: {
-            text: finalResponse,
-            metadata: { 
-                askedQuestion: finalResponse,
-                stage: "info_sharing"
+    // If this is a user response, transition to info_sharing stage
+    if (isUserResponse) {
+        elizaLogger.info("User responded to needs matching, transitioning to info_sharing stage");
+        
+        // Store the needs matching response in memory with stage transition to info_sharing
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: finalResponse,
+                metadata: { 
+                    askedQuestion: finalResponse,
+                    stage: "info_sharing"
+                }
             }
-        }
-    });
-    
-    return finalResponse;
+        });
+        
+        // Let info sharing handler create the actual response
+        const transitionMessage = {
+            ..._message,
+            content: { text: "" }
+        };
+        return await handleInfoSharing(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
+    } else {
+        // This is the initial transition from priorities_discovery, stay in needs_matching
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: finalResponse,
+                metadata: { 
+                    askedQuestion: finalResponse,
+                    stage: "needs_matching"
+                }
+            }
+        });
+        
+        return finalResponse;
+    }
 }
 
 // Info Sharing Handler
