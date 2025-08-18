@@ -1431,182 +1431,97 @@ Return ONLY the response text, no extra commentary or formatting.`;
 
 // Needs Matching Handler
 async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
-    // Check if this is a user response (not the initial transition)
-    const isUserResponse = _message.content.text && _message.userId !== _message.agentId;
-    
-    // Save the user response if this is a user message
-    if (isUserResponse) {
+    // Save user response from this stage
+    if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "needs_matching", _message.content.text);
     }
     
-    // Get all user responses from previous stages
-    const userResponses = await getUserResponses(_runtime, _message);
-    const situationResponses = userResponses.situation || [];
-    const lifestyleResponses = userResponses.lifestyle || [];
-    const readinessResponses = userResponses.readiness || [];
-    const prioritiesResponses = userResponses.priorities || [];
-    
-    // Show comprehensive summary of all collected responses
-    elizaLogger.info(`=== NEEDS MATCHING STAGE ===`);
-    elizaLogger.info(`📋 COMPREHENSIVE USER RESPONSE SUMMARY:`);
-    elizaLogger.info(`  🏠 Situation Responses (${situationResponses.length}): ${JSON.stringify(situationResponses, null, 2)}`);
-    elizaLogger.info(`  🎯 Lifestyle Responses (${lifestyleResponses.length}): ${JSON.stringify(lifestyleResponses, null, 2)}`);
-    elizaLogger.info(`  💭 Readiness Responses (${readinessResponses.length}): ${JSON.stringify(readinessResponses, null, 2)}`);
-    elizaLogger.info(`  ⭐ Priority Responses (${prioritiesResponses.length}): ${JSON.stringify(prioritiesResponses, null, 2)}`);
-    elizaLogger.info(`Current user message: ${_message.content.text}`);
-    elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
-    elizaLogger.info(`===============================`);
+    // Get comprehensive record to see all previous answers
+    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
+    const situationQAEntries = comprehensiveRecord?.situation_discovery || [];
+    const lifestyleQAEntries = comprehensiveRecord?.lifestyle_discovery || [];
+    const readinessQAEntries = comprehensiveRecord?.readiness_discovery || [];
+    const prioritiesQAEntries = comprehensiveRecord?.priorities_discovery || [];
     
     // Get contact information for personalization
     const contactInfo = await getContactInfo(_runtime, _message);
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
-    elizaLogger.info(`Using name in needs matching: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     
-    // Combine all responses for comprehensive analysis
-    const allUserResponses = [
-        ...situationResponses,
-        ...lifestyleResponses,
-        ...readinessResponses,
-        ...prioritiesResponses
-    ].join(" ");
+    elizaLogger.info(`=== NEEDS MATCHING STAGE ===`);
+    elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
+    elizaLogger.info(`===============================`);
     
-    // Analyze user response and update status using AI with deeply emotional, empathetic language
-    const context = `Current user status: "${discoveryState.userStatus}"
-                    Personality of Grace: "${gracePersonality}"
-                    User ${userName ? `(${userName}) ` : ''}latest response about what would bring ${lovedOneName} peace and joy: "${_message.content.text}"
-                    All user responses throughout discovery: "${allUserResponses}"
-
-                    Please analyze all this information and provide TWO things in JSON format:
-                    1. A comprehensive final status report about the user's complete situation, needs, interests, priorities, and what they want, incorporating all discovery information
-                    2. A deeply empathetic, beautiful response that acknowledges what they shared and shows why Grand Villa is a perfect fit for ${lovedOneName}'s needs, like a line from a heartfelt film. Your response should:
-
-                    - Use both the user's name "${userName}" and ${lovedOneName}'s name naturally to make it personal and warm
-                    - Begin with an evocative, emotional phrase or reflection that sounds like a touching line from a film
-                    - Show deep understanding of their situation, weaving in vivid imagery or metaphors if appropriate
-                    - Clearly explain why Grand Villa is a perfect fit for what ${lovedOneName} needs (community, care, activities, connections) in a way that feels natural and inspiring
-                    - Feel like a loving friend, wise counselor, or thoughtful guide speaking – always authentic, never robotic or generic
-                    - Use language that inspires reflection, evokes genuine emotion, and feels profoundly human – words they might carry with them after reading
-                    - Be longer and richer than typical chatbot replies (under 120 words) to convey care and thoughtful understanding, but remain clear and purposeful
-
-                    Return your response in this exact JSON format:
-                    {
-                        "updatedUserStatus": "Comprehensive final analysis of user's complete situation, family needs, interests, priorities, readiness level, and what they're looking for in senior living, incorporating all discovery information",
-                        "responseMessage": "A deeply empathetic, beautifully written response that uses both ${userName} and ${lovedOneName}'s names, starts with an evocative phrase, and explains why Grand Villa is a perfect fit for their needs in a way that feels loving, cinematic, and human. LIMIT TO 120 WORDS OR LESS."
-                    }
-
-                    Make sure to return ONLY valid JSON, no additional text.`;
-
-    let updatedUserStatus = "";
-    let finalResponse = "";
+    // Combine all previous answers for comprehensive analysis
+    const allPreviousAnswers = [
+        ...situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
+        ...lifestyleQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
+        ...readinessQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
+        ...prioritiesQAEntries.map(entry => `${entry.question}: ${entry.answer}`)
+    ].join(" | ");
     
+    // Generate a response that matches Grand Villa to the user's needs based on their previous answers
+    const responseContext = `The user ${userName ? `(${userName}) ` : ''}has shared information about their situation and ${lovedOneName}'s needs throughout our discovery process.
+
+        All previous answers: "${allPreviousAnswers}"
+        User's latest response: "${_message.content.text}"
+        
+        Create a single response that strictly follows this pattern:
+        1. Begin with "Since you mentioned..." and recap one key concern or preference from previous answers.
+        2. Immediately connect that concern to a specific Grand Villa feature, service, or benefit that directly addresses it.
+        3. Use natural, empathetic phrasing that feels warm and personal—like a caring friend.
+        4. Keep the response concise (1–2 sentences, under 60 words), with sentence rhythm and style matching these examples:
+        
+        Examples:
+        "Since you mentioned that making sure your mom eats well is important, I think you’ll love learning more about our chef-prepared meals. We focus on fresh, nutritious options, and residents enjoy a social dining experience, which often improves appetite and overall well-being."
+        "Since your dad used to love gardening, I think he’d really enjoy our resident-led gardening club. It’s a great way for him to do something he enjoys while meeting new people in a relaxed setting."
+        "Since your mom has had a few falls recently, I want to highlight the extra safety measures in place here—like our emergency response system and 24/7 trained staff. That way, she has independence but also support when needed."
+        
+        Return ONLY the response text, no extra commentary or formatting.`;
+
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
-            context: context,
+            context: responseContext,
             modelClass: ModelClass.SMALL
         });
-
-        const parsed = JSON.parse(aiResponse);
-        // 🔧 Fix: Convert object to string if needed
-        const rawStatus = parsed.updatedUserStatus || "";
-        updatedUserStatus = typeof rawStatus === 'object' ? JSON.stringify(rawStatus) : rawStatus;
-        finalResponse = parsed.responseMessage || "";
+        elizaLogger.info(`@chris response text: ${responseContext}`);
         
-        // Log the extracted information
-        elizaLogger.info(`=== UPDATED USER STATUS ===`);
-        elizaLogger.info(updatedUserStatus);
-        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
-        elizaLogger.info(finalResponse);
-        elizaLogger.info(`===========================`);
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}Based on everything you've shared about ${lovedOneName}, I can see how Grand Villa would be such a perfect fit. The community, care, and activities we offer align beautifully with what you've described. It sounds like this could really bring ${lovedOneName} the peace and joy you want for them.`;
         
-        // Display comprehensive Q&A summary at needs matching stage
-        await displayQASummary(_runtime, _message);
-        
-    } catch (error) {
-        elizaLogger.error("Failed to parse JSON response:", error);
-        // Still display Q&A summary even if response generation failed
-        await displayQASummary(_runtime, _message);
-        
-        // Generate fallback response with emotional tone
-        try {
-            const fallbackPrompt = `User ${userName ? `(${userName}) ` : ''}comprehensive status: "${discoveryState.userStatus}"
-                                   All user responses throughout discovery: "${allUserResponses}"
-                                   They want to bring ${lovedOneName} peace and joy: "${_message.content.text}"
-
-                                   Based on this understanding, generate a deeply empathetic response similar to this example:
-                                   "That's such a beautiful way to put it, ${userName || 'John'}—helping her find a new way to see life. It sounds like being surrounded by others and having opportunities to connect could really lift her spirits."
-
-                                   Your response should:
-                                   ${userName ? `IMPORTANT: Start with the user's name "${userName}" and acknowledge what they shared in a beautiful, emotional way` : 'Begin by acknowledging what they shared in a beautiful, emotional way'}
-                                   1. Use phrases like "That's such a beautiful way to put it" or "It sounds like" to validate their feelings
-                                   2. Build on what they said about bringing ${lovedOneName} peace/joy
-                                   3. Naturally connect to how Grand Villa could provide those things (community, activities, connections)
-                                   4. Feel like a caring friend who sees the beauty in their love for ${lovedOneName}
-
-                                   ${userName ? `Start the response with "${userName}," and then continue.` : ''} Keep it emotionally resonant, caring, and deeply empathetic. LIMIT TO 65 WORDS OR LESS. Make it feel like you truly understand the beauty of their love and care.`;
-            
-            const personalizedResponse = await generateText({
-                runtime: _runtime,
-                context: fallbackPrompt,
-                modelClass: ModelClass.SMALL
-            });
-            
-            if (personalizedResponse) {
-                elizaLogger.info(`Generated fallback personalized needs matching response: ${personalizedResponse}`);
-                finalResponse = personalizedResponse;
-            }
-        } catch (fallbackError) {
-            elizaLogger.error(`Error generating fallback needs matching response: ${fallbackError}`);
-        }
-    }
-
-    // Ultimate fallback to default response if all generation fails
-    if (!finalResponse) {
-        finalResponse = `${userName ? `${userName}, ` : ''}That's such a beautiful way to think about it—wanting to bring ${lovedOneName} peace and joy. It sounds like having a caring community around them could really make a difference. Grand Villa has that warm, supportive environment where residents truly feel at home. Would you like to visit and see how the community could embrace ${lovedOneName}?`;
-    }
-    
-    // If this is a user response, transition to info_sharing stage
-    if (isUserResponse) {
-        elizaLogger.info("User responded to needs matching, transitioning to info_sharing stage");
-        
-        // Store the needs matching response in memory with stage transition to info_sharing
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
             userId: _message.userId,
             agentId: _message.agentId,
             content: {
-                text: finalResponse,
+                text: response,
                 metadata: { 
-                    askedQuestion: finalResponse,
                     stage: "info_sharing"
                 }
             }
         });
         
-        // Let info sharing handler create the actual response
-        const transitionMessage = {
-            ..._message,
-            content: { text: "" }
-        };
-        return await handleInfoSharing(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
-    } else {
-        // This is the initial transition from priorities_discovery, stay in needs_matching
+        return response;
+        
+    } catch (error) {
+        elizaLogger.error("Failed to generate AI response:", error);
+        const fallbackResponse = `${userName ? `${userName}, ` : ''}Based on everything you've shared about ${lovedOneName}, I can see how Grand Villa would be such a perfect fit. The community, care, and activities we offer align beautifully with what you've described. It sounds like this could really bring ${lovedOneName} the peace and joy you want for them.`;
+        
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
             userId: _message.userId,
             agentId: _message.agentId,
             content: {
-                text: finalResponse,
+                text: fallbackResponse,
                 metadata: { 
-                    askedQuestion: finalResponse,
-                    stage: "needs_matching"
+                    stage: "info_sharing"
                 }
             }
         });
         
-        return finalResponse;
+        return fallbackResponse;
     }
 }
 
