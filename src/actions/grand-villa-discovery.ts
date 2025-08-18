@@ -1431,8 +1431,11 @@ Return ONLY the response text, no extra commentary or formatting.`;
 
 // Needs Matching Handler
 async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
+    // Check if this is a user response (not the initial transition)
+    const isUserResponse = _message.content.text && _message.userId !== _message.agentId;
+    
     // Save user response from this stage
-    if (_message.content.text && _message.userId !== _message.agentId) {
+    if (isUserResponse) {
         await saveUserResponse(_runtime, _message, "needs_matching", _message.content.text);
     }
     
@@ -1451,78 +1454,110 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     
     elizaLogger.info(`=== NEEDS MATCHING STAGE ===`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
+    elizaLogger.info(`Is user response: ${isUserResponse}`);
     elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
     elizaLogger.info(`===============================`);
     
-    // Combine all previous answers for comprehensive analysis
-    const allPreviousAnswers = [
-        ...situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
-        ...lifestyleQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
-        ...readinessQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
-        ...prioritiesQAEntries.map(entry => `${entry.question}: ${entry.answer}`)
-    ].join(" | ");
-    
-    // Generate a response that matches Grand Villa to the user's needs based on their previous answers
-    const responseContext = `The user ${userName ? `(${userName}) ` : ''}has shared information about their situation and ${lovedOneName}'s needs throughout our discovery process.
+    // If this is NOT a user response (initial transition), stay in needs_matching and provide the matching response
+    if (!isUserResponse) {
+        // Combine all previous answers for comprehensive analysis
+        const allPreviousAnswers = [
+            ...situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
+            ...lifestyleQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
+            ...readinessQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
+            ...prioritiesQAEntries.map(entry => `${entry.question}: ${entry.answer}`)
+        ].join(" | ");
+        
+        // Generate a response that matches Grand Villa to the user's needs based on their previous answers
+        const responseContext = `The user ${userName ? `(${userName}) ` : ''}has shared information about their situation and ${lovedOneName}'s needs throughout our discovery process.
 
-        All previous answers: "${allPreviousAnswers}"
-        User's latest response: "${_message.content.text}"
-        
-        Create a single response that strictly follows this pattern:
-        1. Begin with "Since you mentioned..." and recap one key concern or preference from previous answers.
-        2. Immediately connect that concern to a specific Grand Villa feature, service, or benefit that directly addresses it.
-        3. Use natural, empathetic phrasing that feels warm and personal—like a caring friend.
-        4. Keep the response concise (1–2 sentences, under 60 words), with sentence rhythm and style matching these examples:
-        
-        Examples:
-        "Since you mentioned that making sure your mom eats well is important, I think you’ll love learning more about our chef-prepared meals. We focus on fresh, nutritious options, and residents enjoy a social dining experience, which often improves appetite and overall well-being."
-        "Since your dad used to love gardening, I think he’d really enjoy our resident-led gardening club. It’s a great way for him to do something he enjoys while meeting new people in a relaxed setting."
-        "Since your mom has had a few falls recently, I want to highlight the extra safety measures in place here—like our emergency response system and 24/7 trained staff. That way, she has independence but also support when needed."
-        
-        Return ONLY the response text, no extra commentary or formatting.`;
+            All previous answers: "${allPreviousAnswers}"
+            Your personality is "${gracePersonality}" — make sure your response style reflects this personality fully.
+            
+            Your task:
+            1. Review all previous answers to identify more than one key concern, preference, or need that matters most for ${lovedOneName}.
+            2. Research what Grand Villa Senior Living specifically offers (services, amenities, care programs, community features).
+            3. Select the most relevant Grand Villa feature or service that directly addresses the concern and don't mention generally, point the exact service or activity that Grand Villa generates.
+            4. Write a single empathetic response that must:
+            - Begin with a warm, natural phrase like "Since you mentioned..." and recap the concern from previous answers.
+            - Immediately highlight a *specific, exact Grand Villa feature or service* (e.g., chef-prepared meals, wellness programs, memory care, social clubs, emergency response system, transportation services, etc.).
+            - Express the response in the exact tone and style of personality so it feels personal and authentic.
+            - Stay concise ( under 60 words).
+            - Follow the exact rhythm and style of these examples:
+            
+            Examples:
+            "Since you mentioned that making sure your mom eats well is important, I think you'll love learning more about our chef-prepared meals. We focus on fresh, nutritious options, and residents enjoy a social dining experience, which often improves appetite and overall well-being."
+            "Since your dad used to love gardening, I think he'd really enjoy our resident-led gardening club. It's a great way for him to do something he enjoys while meeting new people in a relaxed setting."
+            "Since your mom has had a few falls recently, I want to highlight the extra safety measures in place here—like our emergency response system and 24/7 trained staff. That way, she has independence but also support when needed."
+            
+            Return ONLY the response text, no extra commentary or formatting.`;
 
-    try {
-        const aiResponse = await generateText({
-            runtime: _runtime,
-            context: responseContext,
-            modelClass: ModelClass.SMALL
-        });
-        elizaLogger.info(`@chris response text: ${responseContext}`);
-        
-        const response = aiResponse || `${userName ? `${userName}, ` : ''}Based on everything you've shared about ${lovedOneName}, I can see how Grand Villa would be such a perfect fit. The community, care, and activities we offer align beautifully with what you've described. It sounds like this could really bring ${lovedOneName} the peace and joy you want for them.`;
-        
-        await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: {
-                text: response,
-                metadata: { 
-                    stage: "info_sharing"
+        try {
+            const aiResponse = await generateText({
+                runtime: _runtime,
+                context: responseContext,
+                modelClass: ModelClass.SMALL
+            });
+            
+            const response = aiResponse || `${userName ? `${userName}, ` : ''}Based on everything you've shared about ${lovedOneName}, I can see how Grand Villa would be such a perfect fit. The community, care, and activities we offer align beautifully with what you've described. It sounds like this could really bring ${lovedOneName} the peace and joy you want for them.`;
+            
+            await _runtime.messageManager.createMemory({
+                roomId: _message.roomId,
+                userId: _message.userId,
+                agentId: _message.agentId,
+                content: {
+                    text: response,
+                    metadata: { 
+                        stage: "needs_matching"
+                    }
                 }
-            }
-        });
-        
-        return response;
-        
-    } catch (error) {
-        elizaLogger.error("Failed to generate AI response:", error);
-        const fallbackResponse = `${userName ? `${userName}, ` : ''}Based on everything you've shared about ${lovedOneName}, I can see how Grand Villa would be such a perfect fit. The community, care, and activities we offer align beautifully with what you've described. It sounds like this could really bring ${lovedOneName} the peace and joy you want for them.`;
-        
-        await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: {
-                text: fallbackResponse,
-                metadata: { 
-                    stage: "info_sharing"
+            });
+            
+            return response;
+            
+        } catch (error) {
+            elizaLogger.error("Failed to generate AI response:", error);
+            const fallbackResponse = `${userName ? `${userName}, ` : ''}Based on everything you've shared about ${lovedOneName}, I can see how Grand Villa would be such a perfect fit. The community, care, and activities we offer align beautifully with what you've described. It sounds like this could really bring ${lovedOneName} the peace and joy you want for them.`;
+            
+            await _runtime.messageManager.createMemory({
+                roomId: _message.roomId,
+                userId: _message.userId,
+                agentId: _message.agentId,
+                content: {
+                    text: fallbackResponse,
+                    metadata: { 
+                        stage: "needs_matching"
+                    }
                 }
-            }
-        });
-        
-        return fallbackResponse;
+            });
+            
+            return fallbackResponse;
+        }
     }
+    
+    // If this IS a user response, transition to info_sharing
+    elizaLogger.info("User responded to needs matching, transitioning to info_sharing stage");
+    
+    // Store the needs matching response in memory with stage transition to info_sharing
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+            text: "STAGE_TRANSITION", // Placeholder that won't be shown
+            metadata: { 
+                stage: "info_sharing",
+                transition: true
+            }
+        }
+    });
+    
+    // Let info sharing handler create the actual response
+    const transitionMessage = {
+        ..._message,
+        content: { text: "" }
+    };
+    return await handleInfoSharing(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
 }
 
 // Info Sharing Handler
