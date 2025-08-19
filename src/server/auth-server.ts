@@ -144,6 +144,7 @@ export class AuthServer {
               lifestyle_discovery: [],
               readiness_discovery: [],
               priorities_discovery: [],
+              visit_scheduling: [],
               last_updated: new Date().toISOString()
             };
 
@@ -205,12 +206,25 @@ export class AuthServer {
                     }
                   }
                 }
+
+                if (record.visit_scheduling) {
+                  for (const entry of record.visit_scheduling) {
+                    const exists = mergedRecord.visit_scheduling.some(existing => existing.question === entry.question);
+                    if (!exists) {
+                      mergedRecord.visit_scheduling.push(entry);
+                      elizaLogger.info(`✅ Added visit scheduling Q&A: ${entry.question} - ${entry.answer}`);
+                    } else {
+                      elizaLogger.info(`⚠️ Skipped duplicate visit scheduling Q&A: ${entry.question}`);
+                    }
+                  }
+                }
               } catch (parseError) {
                 elizaLogger.error("Error parsing comprehensive record:", parseError);
               }
             }
 
             comprehensiveRecord = mergedRecord;
+            elizaLogger.info(`🎯 MERGED COMPREHENSIVE RECORD: ${mergedRecord.situation_discovery.length} situation, ${mergedRecord.lifestyle_discovery.length} lifestyle, ${mergedRecord.readiness_discovery.length} readiness, ${mergedRecord.priorities_discovery.length} priorities, ${mergedRecord.visit_scheduling.length} visit scheduling entries`);
           }
 
           // Get visit info
