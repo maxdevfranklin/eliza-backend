@@ -304,12 +304,6 @@ export const grandVillaDiscoveryAction: Action = {
                     case "needs_matching":
                         response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
-                    case "info_sharing":
-                        response_text = await handleInfoSharing(_runtime, _message, _state, discoveryState, gracePersonality);
-                        break;
-                    case "visit_transition":    
-                        response_text = await handleVisitTransition(_runtime, _message, _state, discoveryState, gracePersonality);
-                        break;
                     case "schedule_visit":
                         response_text = await handleScheduleVisit(_runtime, _message, _state, discoveryState, gracePersonality);
                         break;
@@ -1558,10 +1552,10 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         }
     }
     
-    // If this IS a user response, transition to info_sharing
-    elizaLogger.info("User responded to needs matching, transitioning to info_sharing stage");
+    // If this IS a user response, transition to schedule_visit
+    elizaLogger.info("User responded to needs matching, transitioning to schedule_visit stage");
     
-    // Store the needs matching response in memory with stage transition to info_sharing
+    // Store the needs matching response in memory with stage transition to schedule_visit
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
@@ -1569,18 +1563,18 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         content: {
             text: "STAGE_TRANSITION", // Placeholder that won't be shown
             metadata: { 
-                stage: "info_sharing",
+                stage: "schedule_visit",
                 transition: true
             }
         }
     });
     
-    // Let info sharing handler create the actual response
+    // Let schedule visit handler create the actual response
     const transitionMessage = {
         ..._message,
         content: { text: "" }
     };
-    return await handleInfoSharing(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
+    return await handleScheduleVisit(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
 }
 
 // Info Sharing Handler
@@ -1695,105 +1689,75 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
     return response;
 }
 
-// Visit Transition Handler
-async function handleVisitTransition(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
-    return "It sounds like your family member could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like.\n\nWould Wednesday afternoon or Friday morning work better for you?";
-}
 
 // Schedule Visit Handler
 async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
     elizaLogger.info("Handling schedule visit stage");
     
+    // Check if this is the first interaction in schedule_visit stage
+    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
+    const hasAskedInitialQuestion = comprehensiveRecord?.visit_scheduling && 
+        comprehensiveRecord.visit_scheduling.some(entry => 
+            entry.question === "Would Wednesday afternoon or Friday morning work better for you?"
+        );
+    
+    // If this is the first interaction, return the initial response
+    if (!hasAskedInitialQuestion) {
+        const userName = await getUserFirstName(_runtime, _message);
+        const contactInfo = await getContactInfo(_runtime, _message);
+        const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+        
+        const initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like. Would Wednesday afternoon or Friday morning work better for you?`;
+        
+        // Add the initial question to visit_scheduling to track that we've asked it
+        const initialQuestionEntry = {
+            question: "Would Wednesday afternoon or Friday morning work better for you?",
+            answer: "Asked",
+            timestamp: new Date().toISOString()
+        };
+        
+        await updateComprehensiveRecord(_runtime, _message, {
+            visit_scheduling: [initialQuestionEntry]
+        });
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: { 
+                text: initialResponse,
+                metadata: {
+                    stage: "schedule_visit"
+                }
+            }
+        });
+        
+        elizaLogger.info(`Stored initial visit scheduling request in schedule_visit stage`);
+        return initialResponse;
+    }
+    
     // Check if user provided a response (not the first interaction)
     if (_message.content.text && _message.userId !== _message.agentId) {
-        // Get all user responses from schedule_visit stage so far
-        let scheduleVisitResponses = await getUserAnswersFromStage(_runtime, _message, "schedule_visit");
-        
-        // Fallback: if stage-based approach returned empty, get recent messages from ONLY current user
-        if (scheduleVisitResponses.length === 0) {
-            elizaLogger.info("Stage-based approach returned empty, using fallback to get current user's messages");
-            const allMemories = await _runtime.messageManager.getMemories({
-                roomId: _message.roomId,
-                count: 20
-            });
-            
-            scheduleVisitResponses = allMemories
-                .filter(mem => mem.userId === _message.userId && mem.userId !== _message.agentId && mem.content.text.trim())
-                .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
-                .slice(-5) // Get last 5 user messages
-                .map(mem => mem.content.text);
-            
-            elizaLogger.info(`🔒 USER ISOLATION: Fallback collected ${scheduleVisitResponses.length} messages from user ${_message.userId} only`);
-        }
-        
-        const allScheduleVisitText = scheduleVisitResponses.join(" ");
-        
-        elizaLogger.info(`=== SCHEDULE VISIT RESPONSES ===`);
-        elizaLogger.info(`All schedule visit responses: ${JSON.stringify(scheduleVisitResponses)}`);
-        elizaLogger.info(`Combined text: ${allScheduleVisitText}`);
-        elizaLogger.info(`===============================`);
-        
-        // Enhanced time extraction: check for recommended times and alternative times
+        // Check if user picked one of the recommended times
         const userResponse = _message.content.text.toLowerCase();
         let selectedTime = null;
-        let alternativeTime = null;
         
         // Check for recommended times
         const normalizedResponse = userResponse.replace(/\s+/g, ' ').toLowerCase();
-        if ((normalizedResponse.includes("thursday") || normalizedResponse.includes("thu")) && 
-            (normalizedResponse.includes("2pm") || normalizedResponse.includes("2 pm") || normalizedResponse.includes("2:00pm") || normalizedResponse.includes("2:00 pm") || normalizedResponse.includes("2"))) {
-            selectedTime = "Thursday 2PM";
-        } else if ((normalizedResponse.includes("tuesday") || normalizedResponse.includes("tue")) && 
-                   (normalizedResponse.includes("11am") || normalizedResponse.includes("11 am") || normalizedResponse.includes("11:00am") || normalizedResponse.includes("11:00 am") || normalizedResponse.includes("11"))) {
-            selectedTime = "Next Tuesday 11AM";
-        } else if ((normalizedResponse.includes("tuesday") || normalizedResponse.includes("tue")) && 
-                   (normalizedResponse.includes("2pm") || normalizedResponse.includes("2 pm") || normalizedResponse.includes("2:00pm") || normalizedResponse.includes("2:00 pm") || normalizedResponse.includes("2"))) {
-            selectedTime = "Tuesday 2PM";
-        }
-        
-        // If no recommended time selected, try to extract alternative times
-        if (!selectedTime) {
-            const timeExtractionContext = `Extract any specific time, day, or date mentioned in this user response: "${_message.content.text}"
-
-            Look for:
-            - Days of the week (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday)
-            - Time periods (morning, afternoon, evening, night)
-            - Specific times (9am, 2pm, etc.)
-            - Dates (next week, tomorrow, etc.)
-            
-            Return your response in this exact JSON format:
-            {
-                "extractedTime": "the extracted time/day/date or null if none found",
-                "hasTimeMention": true/false
-            }
-            
-            Make sure to return ONLY valid JSON, no additional text.`;
-
-            try {
-                const aiResponse = await generateText({
-                    runtime: _runtime,
-                    context: timeExtractionContext,
-                    modelClass: ModelClass.SMALL
-                });
-
-                const parsed = JSON.parse(aiResponse);
-                if (parsed.hasTimeMention && parsed.extractedTime) {
-                    alternativeTime = parsed.extractedTime;
-                    elizaLogger.info(`Extracted alternative time: ${alternativeTime}`);
-                }
-            } catch (error) {
-                elizaLogger.error("Error extracting alternative time:", error);
-            }
+        if ((normalizedResponse.includes("wednesday") || normalizedResponse.includes("wed")) && 
+            (normalizedResponse.includes("afternoon") || normalizedResponse.includes("pm") || normalizedResponse.includes("2pm") || normalizedResponse.includes("3pm") || normalizedResponse.includes("4pm"))) {
+            selectedTime = "Wednesday afternoon";
+        } else if ((normalizedResponse.includes("friday") || normalizedResponse.includes("fri")) && 
+                   (normalizedResponse.includes("morning") || normalizedResponse.includes("am") || normalizedResponse.includes("9am") || normalizedResponse.includes("10am") || normalizedResponse.includes("11am"))) {
+            selectedTime = "Friday morning";
         }
         
         elizaLogger.info(`=== VISIT TIMING CHECK ===`);
         elizaLogger.info(`User response: ${userResponse}`);
-        elizaLogger.info(`Normalized response: ${userResponse.replace(/\s+/g, ' ').toLowerCase()}`);
-        elizaLogger.info(`Selected recommended time: ${selectedTime || 'NO'}`);
-        elizaLogger.info(`Extracted alternative time: ${alternativeTime || 'NO'}`);
+        elizaLogger.info(`Selected time: ${selectedTime || 'NO'}`);
         elizaLogger.info(`========================`);
 
-        // If user picked one of the recommended options, save it and provide confirmation
+        // If user picked one of the recommended times, save it and end conversation
         if (selectedTime) {
             elizaLogger.info(`=== USER SELECTED TIME: ${selectedTime} ===`);
             
@@ -1829,10 +1793,6 @@ async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _s
             
             elizaLogger.info(`🎯 COMPREHENSIVE RECORD UPDATED - Visit scheduling saved: ${JSON.stringify(existingVisitScheduling)}`);
             
-            // Update user status with visit timing information
-            const statusUpdate = `Visit scheduled for ${selectedTime}`;
-            await updateUserStatus(_runtime, _message, statusUpdate);
-            
             // Get user name and loved one's name for personalized response
             const userName = await getUserFirstName(_runtime, _message);
             const contactInfo = await getContactInfo(_runtime, _message);
@@ -1859,145 +1819,17 @@ async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _s
             return confirmationResponse; // EXIT HERE - Don't continue asking questions
         }
         
-        // If user provided an alternative time, save it directly
-        if (alternativeTime) {
-            const userName = await getUserFirstName(_runtime, _message);
-            const contactInfo = await getContactInfo(_runtime, _message);
-            const lovedOneName = contactInfo?.loved_one_name || "your loved one";
-            
-            // Generate a response that acknowledges their time choice
-            const alternativeResponseContext = `The user ${userName ? `(${userName}) ` : ''}suggested: "${alternativeTime}" as their preferred visit time.
-
-            Generate a warm, enthusiastic response that:
-            1. Acknowledges their suggested time positively
-            2. Shows flexibility and willingness to accommodate their preference
-            3. Confirms the time and provides next steps
-            4. Maintains the caring, personal tone
-            
-            ${gracePersonality}
-            
-            Return ONLY the response text, no extra commentary or formatting.`;
-
-            try {
-                const aiResponse = await generateText({
-                    runtime: _runtime,
-                    context: alternativeResponseContext,
-                    modelClass: ModelClass.SMALL
-                });
-                
-                const alternativeResponse = aiResponse || `${userName ? `${userName}, ` : ''}${alternativeTime} sounds perfect! I can definitely arrange that for you. I'll send you a confirmation with all the details and directions. We're excited to show you and ${lovedOneName} around Grand Villa!`;
-                
-                // Save the alternative time directly to comprehensive record
-                const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
-                const existingVisitScheduling = comprehensiveRecord?.visit_scheduling || [];
-                
-                // Check if we already have a visit scheduling entry to update
-                const existingEntryIndex = existingVisitScheduling.findIndex(entry => 
-                    entry.question === "What time would work best for your visit?"
-                );
-                
-                if (existingEntryIndex !== -1) {
-                    // Update existing entry with the alternative time
-                    existingVisitScheduling[existingEntryIndex].answer = alternativeTime;
-                    existingVisitScheduling[existingEntryIndex].timestamp = new Date().toISOString();
-                    elizaLogger.info(`✓ Updated existing visit scheduling entry with: ${alternativeTime}`);
-                } else {
-                    // Add new entry for the alternative time
-                    const alternativeTimeEntry = {
-                        question: "What time would work best for your visit?",
-                        answer: alternativeTime,
-                        timestamp: new Date().toISOString()
-                    };
-                    existingVisitScheduling.push(alternativeTimeEntry);
-                    elizaLogger.info(`✓ Added new visit scheduling entry: ${JSON.stringify(alternativeTimeEntry)}`);
-                }
-                
-                // Update the comprehensive record with the modified visit_scheduling array
-                await updateComprehensiveRecord(_runtime, _message, {
-                    visit_scheduling: existingVisitScheduling
-                });
-                
-                await _runtime.messageManager.createMemory({
-                    roomId: _message.roomId,
-                    userId: _message.userId,
-                    agentId: _message.agentId,
-                    content: { 
-                        text: alternativeResponse,
-                        metadata: {
-                            stage: "schedule_visit",
-                            visit_scheduled: true,
-                            selected_time: alternativeTime
-                        }
-                    }
-                });
-                
-                elizaLogger.info(`🎉 CONVERSATION COMPLETE - Visit scheduled for ${alternativeTime}`);
-                return alternativeResponse;
-                
-            } catch (error) {
-                elizaLogger.error("Failed to generate alternative response:", error);
-                const fallbackResponse = `${userName ? `${userName}, ` : ''}${alternativeTime} sounds perfect! I can definitely arrange that for you. I'll send you a confirmation with all the details and directions. We're excited to show you and ${lovedOneName} around Grand Villa!`;
-                
-                // Save the alternative time directly to comprehensive record
-                const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
-                const existingVisitScheduling = comprehensiveRecord?.visit_scheduling || [];
-                
-                // Check if we already have a visit scheduling entry to update
-                const existingEntryIndex = existingVisitScheduling.findIndex(entry => 
-                    entry.question === "What time would work best for your visit?"
-                );
-                
-                if (existingEntryIndex !== -1) {
-                    // Update existing entry with the alternative time
-                    existingVisitScheduling[existingEntryIndex].answer = alternativeTime;
-                    existingVisitScheduling[existingEntryIndex].timestamp = new Date().toISOString();
-                    elizaLogger.info(`✓ Updated existing visit scheduling entry with: ${alternativeTime}`);
-                } else {
-                    // Add new entry for the alternative time
-                    const alternativeTimeEntry = {
-                        question: "What time would work best for your visit?",
-                        answer: alternativeTime,
-                        timestamp: new Date().toISOString()
-                    };
-                    existingVisitScheduling.push(alternativeTimeEntry);
-                    elizaLogger.info(`✓ Added new visit scheduling entry: ${JSON.stringify(alternativeTimeEntry)}`);
-                }
-                
-                // Update the comprehensive record with the modified visit_scheduling array
-                await updateComprehensiveRecord(_runtime, _message, {
-                    visit_scheduling: existingVisitScheduling
-                });
-                
-                await _runtime.messageManager.createMemory({
-                    roomId: _message.roomId,
-                    userId: _message.userId,
-                    agentId: _message.agentId,
-                    content: { 
-                        text: fallbackResponse,
-                        metadata: {
-                            stage: "schedule_visit",
-                            visit_scheduled: true,
-                            selected_time: alternativeTime
-                        }
-                    }
-                });
-                
-                elizaLogger.info(`🎉 CONVERSATION COMPLETE - Visit scheduled for ${alternativeTime}`);
-                return fallbackResponse;
-            }
-        }
-        
-        // If user didn't provide any specific time, offer more flexible options
+        // If user didn't pick Wednesday afternoon or Friday morning, ask what time works best
         const userName = await getUserFirstName(_runtime, _message);
         const contactInfo = await getContactInfo(_runtime, _message);
         const lovedOneName = contactInfo?.loved_one_name || "your loved one";
         
-        // Generate a more flexible response based on user's message
-        const flexibleResponseContext = `The user ${userName ? `(${userName}) ` : ''}didn't pick the suggested times (Wednesday afternoon or Friday morning) and didn't provide a specific alternative. Their response was: "${_message.content.text}"
+        // Generate a response asking what time works best
+        const flexibleResponseContext = `The user ${userName ? `(${userName}) ` : ''}didn't pick the suggested times (Wednesday afternoon or Friday morning). Their response was: "${_message.content.text}"
 
         Generate a warm, understanding response that:
         1. Acknowledges their response without repeating the same question
-        2. Offers more flexible scheduling options
+        2. Asks what time would work best for them
         3. Shows we're willing to work with their schedule
         4. Maintains the caring, personal tone
         
@@ -2012,7 +1844,7 @@ async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _s
                 modelClass: ModelClass.SMALL
             });
             
-            const flexibleResponse = aiResponse || `${userName ? `${userName}, ` : ''}I understand! Let's find a time that works perfectly for you. We have availability throughout the week - mornings, afternoons, and even some evenings. What would be most convenient for your schedule? I'm happy to work around your timing.`;
+            const flexibleResponse = aiResponse || `${userName ? `${userName}, ` : ''}I understand! Let's find a time that works perfectly for you. What time would work best for your schedule? I'm happy to work around your timing.`;
             
             await _runtime.messageManager.createMemory({
                 roomId: _message.roomId,
@@ -2030,7 +1862,7 @@ async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _s
             
         } catch (error) {
             elizaLogger.error("Failed to generate flexible response:", error);
-            const fallbackResponse = `${userName ? `${userName}, ` : ''}I understand! Let's find a time that works perfectly for you. We have availability throughout the week - mornings, afternoons, and even some evenings. What would be most convenient for your schedule? I'm happy to work around your timing.`;
+            const fallbackResponse = `${userName ? `${userName}, ` : ''}I understand! Let's find a time that works perfectly for you. What time would work best for your schedule? I'm happy to work around your timing.`;
             
             await _runtime.messageManager.createMemory({
                 roomId: _message.roomId,
@@ -2053,7 +1885,7 @@ async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _s
     const contactInfo = await getContactInfo(_runtime, _message);
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
     
-    const initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like. Would Thursday 2PM or next Tuesday 11AM work better for you?`;
+    const initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like. Would Wednesday afternoon or Friday morning work better for you?`;
     
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
