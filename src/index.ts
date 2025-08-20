@@ -29,10 +29,10 @@ import { grandVillaDiscoveryAction } from "./actions/grand-villa-discovery.ts";
 // import { grandvillaAction } from "./actions/grand-villa.ts";
 import { discoveryStateProvider } from "./providers/discovery-state.ts";
 import { AuthServer } from "./server/auth-server.ts";
-import authRoutes from './auth/auth-routes';
+import { AuthRoutes } from './auth/auth-routes.ts';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 export const wait = (minTime: number = 1000, maxTime: number = 3000) => {
   const waitTime =
     Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
@@ -114,7 +114,19 @@ async function startAgent(character: Character, directClient: DirectClient) {
     throw error;
   }
 }
+function setCors(res: import('http').ServerResponse) {
+  res.setHeader("Access-Control-Allow-Origin", process.env.FRONTEND_URL || "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+import type { IncomingMessage } from 'http';
 
+async function readJson(req: IncomingMessage) {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of req) chunks.push(chunk as Uint8Array);
+  const raw = Buffer.concat(chunks).toString('utf8');
+  return raw ? JSON.parse(raw) : {};
+}
 const checkPortAvailable = (port: number): Promise<boolean> => {
   return new Promise((resolve) => {
     const server = net.createServer();
@@ -173,18 +185,20 @@ const startAgents = async () => {
   };
 
   // Start DirectClient on an internal port (serverPort + 1000 to avoid conflicts)
-  const directClientPort = serverPort + 1000;
+  let directClientPort = serverPort + 1000;
   while (!(await checkPortAvailable(directClientPort))) {
     elizaLogger.warn(`Internal port ${directClientPort} is in use, trying ${directClientPort + 1}`);
+    directClientPort++;
   }
   directClient.start(directClientPort);
+  
   elizaLogger.info(`DirectClient started on internal port ${directClientPort}`);
 
   // Create integrated server with auth and message proxying
   if (firstRuntime) {
     const authServer = new AuthServer(firstRuntime);
     const { createServer, request } = await import('http');
-    
+    const auth = new AuthRoutes(firstRuntime);
     // Helper function to proxy requests
     const proxyRequest = (req: any, res: any) => {
       const options = {
@@ -213,6 +227,44 @@ const startAgents = async () => {
     const integratedServer = createServer(async (req, res) => {
       const url = new URL(req.url || '/', `http://${req.headers.host}`);
       const pathname = url.pathname;
+// CORS preflight only for auth endpoints
+if (
+  req.method === "OPTIONS" &&
+  (pathname.startsWith("/api/auth/") || pathname.startsWith("/auth/"))
+) {
+  setCors(res);
+  res.statusCode = 204;
+  res.end();
+  return;
+}
+
+// Forgot password
+if (
+  req.method === "POST" &&
+  (pathname === "/api/auth/forgot-password" || pathname === "/auth/forgot-password")
+) {
+  setCors(res);
+  const body = await readJson(req);
+  const r = await auth.handleForgotPassword(body);
+  res.statusCode = r.status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(r.data));
+  return;
+}
+
+// Reset password
+if (
+  req.method === "POST" &&
+  (pathname === "/api/auth/reset-password" || pathname === "/auth/reset-password")
+) {
+  setCors(res);
+  const body = await readJson(req);
+  const r = await auth.handleResetPassword(body);
+  res.statusCode = r.status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(r.data));
+  return;
+}
 
       elizaLogger.debug(`Request: ${req.method} ${pathname}`);
 
