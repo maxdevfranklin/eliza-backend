@@ -1,6 +1,7 @@
 import { elizaLogger, IAgentRuntime } from "@elizaos/core";
 import { AuthService, type LoginRequest, type RegisterRequest } from './auth-service.ts';
 import { UserDatabase } from '../database/users.ts';
+import { ensurePasswordResetTable, requestPasswordReset, performPasswordReset } from './passwordReset.ts';
 
 export class AuthRoutes {
   private authService: AuthService;
@@ -16,6 +17,9 @@ export class AuthRoutes {
     this.isPostgres = !!(runtime.databaseAdapter as any).query || !!(runtime.databaseAdapter as any).connectionString;
     
     this.initializeUserDatabase();
+    ensurePasswordResetTable(this.runtime.databaseAdapter).catch(err =>
+      elizaLogger.error("ensurePasswordResetTable error:", err)
+    );
   }
 
   // Getter method to access runtime
@@ -260,7 +264,25 @@ export class AuthRoutes {
       };
     }
   }
-
+  async handleForgotPassword(body: any): Promise<{ status: number; data: any }> {
+    const email = String(body?.email ?? "").trim().toLowerCase();
+    const origin = process.env.FRONTEND_URL || "http://localhost:3001";
+    await requestPasswordReset(this.runtime.databaseAdapter, email, origin);
+    return { status: 200, data: { success: true, message: "If an account exists, a reset link has been sent." } };
+  }
+  
+  async handleResetPassword(body: any): Promise<{ status: number; data: any }> {
+    const token = String(body?.token ?? "");
+    const password = String(body?.password ?? "");
+    if (!token || !password) {
+      return { status: 400, data: { success: false, message: "token and password are required" } };
+    }
+    const out = await performPasswordReset(this.runtime.databaseAdapter, token, password);
+    return out.success
+      ? { status: 200, data: out }
+      : { status: 400, data: out };
+  }
+  
   // Get auth service for middleware use
   getAuthService(): AuthService {
     return this.authService;
