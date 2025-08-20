@@ -5,9 +5,8 @@ import { elizaLogger } from "@elizaos/core";
 const isPg = (adapter: any) => !!(adapter.query || adapter.connectionString);
 const q = async (adapter: any, sql: string, params: any[] = []) => {
   if (isPg(adapter)) {
-    const exec = adapter.query ?? adapter.db?.query;
-    if (!exec) throw new Error("PostgreSQL query method not found");
-    return exec.call(adapter, sql, params);
+    const exec = pgExec(adapter);
+    return exec(sql, params);
   }
   const db = adapter.db || adapter;
   const s = sql.replace(/\$(\d+)/g, "?");
@@ -15,6 +14,7 @@ const q = async (adapter: any, sql: string, params: any[] = []) => {
   if (db.run) return db.run(s, params);
   throw new Error("SQLite query method not found");
 };
+
 
 export async function ensurePasswordResetTable(adapter: any) {
   const sql = `
@@ -36,7 +36,11 @@ export async function ensurePasswordResetTable(adapter: any) {
     /* table already exists or extensions pre-created */
   }
 }
-
+function pgExec(adapter: any) {
+  if (adapter.query) return adapter.query.bind(adapter);
+  if (adapter.db?.query) return adapter.db.query.bind(adapter.db);
+  throw new Error("PostgreSQL query method not found");
+}
 export async function requestPasswordReset(
   adapter: any,
   email: string,
@@ -48,24 +52,21 @@ export async function requestPasswordReset(
   const sel = isPg(adapter)
   ? `SELECT id FROM users WHERE lower(email) = lower($1)`
   : `SELECT id FROM users WHERE lower(email) = lower(?)`;
+ 
   let userId: string | null = null;
-
-  try {
-    if (isPg(adapter)) {
-      const res = (await (adapter.query ?? adapter.db.query).call(
-        adapter,
-        sel,
-        [lower]
-      )) as { rows: any[] };
-      userId = res.rows?.[0]?.id ?? null;
-    } else {
-      const db = adapter.db || adapter;
-      const row = db.prepare(sel.replace(/\$(\d+)/g, "?")).get(lower);
-      userId = row?.id ?? null;
-    }
-  } catch (e) {
-    elizaLogger.error("Error looking up user for reset:", e);
+try {
+  if (isPg(adapter)) {
+    const exec = pgExec(adapter);
+    const res = (await exec(sel, [lower])) as { rows: any[] };
+    userId = res.rows?.[0]?.id ?? null;
+  } else {
+    const db = adapter.db || adapter;
+    const row = db.prepare(sel.replace(/\$(\d+)/g, "?")).get(lower);
+    userId = row?.id ?? null;
   }
+} catch (e) {
+  elizaLogger.error("Error looking up user for reset:", e);
+}
 
   // 2) If user exists, store a hashed token
   const rawToken = randomBytes(32).toString("base64url");
@@ -104,16 +105,15 @@ export async function performPasswordReset(
          WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP 
          LIMIT 1`;
 
-  let row: any = null;
-  if (isPg(adapter)) {
-    const res = (await (adapter.query ?? adapter.db.query).call(adapter, sel, [
-      tokenHash,
-    ])) as { rows: any[] };
-    row = res.rows?.[0] ?? null;
-  } else {
-    const db = adapter.db || adapter;
-    row = db.prepare(sel.replace(/\$(\d+)/g, "?")).get(tokenHash);
-  }
+         let row: any = null;
+         if (isPg(adapter)) {
+           const exec = pgExec(adapter);
+           const res = (await exec(sel, [tokenHash])) as { rows: any[] };
+           row = res.rows?.[0] ?? null;
+         } else {
+           const db = adapter.db || adapter;
+           row = db.prepare(sel.replace(/\$(\d+)/g, "?")).get(tokenHash);
+         }
 
   if (!row) return { success: false, message: "Invalid or expired token" };
 
