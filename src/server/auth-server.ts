@@ -103,6 +103,27 @@ export class AuthServer {
         return true;
       }
 
+      // Admin endpoints
+      if (pathname === '/auth/admin/users' && req.method === 'GET') {
+        const result = await this.authRoutes.handleGetAllUsers();
+        this.sendJsonResponse(res, result.status, result.data);
+        return true;
+      }
+
+      if (pathname === '/auth/admin/chat-history' && req.method === 'GET') {
+        const urlObj = new URL(req.url || '/', `http://${req.headers.host}`);
+        const username = urlObj.searchParams.get('username');
+        
+        if (!username) {
+          this.sendJsonResponse(res, 400, { success: false, message: 'Username is required' });
+          return true;
+        }
+
+        const result = await this.authRoutes.handleGetChatHistory(username);
+        this.sendJsonResponse(res, result.status, result.data);
+        return true;
+      }
+
       // Comprehensive record endpoint
       if (pathname === '/auth/comprehensive-record' && req.method === 'GET') {
         const urlObj = new URL(req.url || '/', `http://${req.headers.host}`);

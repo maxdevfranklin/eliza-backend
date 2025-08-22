@@ -15,12 +15,26 @@ export class AuthRoutes {
     // Check if this is a PostgreSQL adapter
     this.isPostgres = !!(runtime.databaseAdapter as any).query || !!(runtime.databaseAdapter as any).connectionString;
     
-    this.initializeUserDatabase();
+    // Initialize database synchronously to avoid race conditions
+    this.initializeUserDatabaseSync();
   }
 
   // Getter method to access runtime
   getRuntime(): IAgentRuntime {
     return this.runtime;
+  }
+
+  private initializeUserDatabaseSync() {
+    try {
+      // For synchronous initialization, we'll call it immediately
+      this.userDb.initialize().then(() => {
+        elizaLogger.info("User database initialized successfully");
+      }).catch((error) => {
+        elizaLogger.error("Failed to initialize user database:", error);
+      });
+    } catch (error) {
+      elizaLogger.error("Failed to start user database initialization:", error);
+    }
   }
 
   private async initializeUserDatabase() {
@@ -269,5 +283,203 @@ export class AuthRoutes {
   // Get user database for other operations
   getUserDatabase(): UserDatabase {
     return this.userDb;
+  }
+
+  // Handle get all users endpoint (admin)
+  async handleGetAllUsers(): Promise<{ status: number; data: any }> {
+    try {
+      elizaLogger.info('Admin: Getting all users...');
+      
+      // Ensure database is initialized
+      try {
+        await this.userDb.initialize();
+      } catch (initError) {
+        elizaLogger.warn('Database already initialized or initialization failed:', initError);
+      }
+      
+      const users = await this.userDb.getAllUsers();
+      elizaLogger.info(`Admin: Found ${users.length} users`);
+      
+      return {
+        status: 200,
+        data: {
+          success: true,
+          users: users.map(user => ({
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+          }))
+        }
+      };
+    } catch (error) {
+      elizaLogger.error('Get all users endpoint error:', error);
+      return {
+        status: 500,
+        data: {
+          success: false,
+          message: 'Internal server error'
+        }
+      };
+    }
+  }
+
+  // Handle get chat history endpoint (admin)
+  async handleGetChatHistory(username: string): Promise<{ status: number; data: any }> {
+    try {
+      elizaLogger.info(`Admin: Getting chat history for user: ${username}`);
+      
+      // Ensure database is initialized
+      try {
+        await this.userDb.initialize();
+      } catch (initError) {
+        elizaLogger.warn('Database already initialized or initialization failed:', initError);
+      }
+      
+      // First, find the account ID from the accounts table (this has the correct UUID format)
+      const account = await this.userDb.getAccountByUsername(username);
+      if (!account) {
+        elizaLogger.warn(`Admin: Account not found: ${username}`);
+        return {
+          status: 404,
+          data: {
+            success: false,
+            message: 'User not found'
+          }
+        };
+      }
+
+      const accountId = account.id;
+      elizaLogger.info(`Admin: Found account ID: ${accountId} for username: ${username}`);
+
+      // Also get the user info from the users table for display
+      const user = await this.userDb.getUserByUsername(username);
+
+      try {
+        // Use database adapter directly to get chat messages
+        const dbAdapter = this.runtime.databaseAdapter as any;
+        let messages: any[] = [];
+        
+        if (this.isPostgres) {
+          // PostgreSQL adapter - use exact UUID match
+          let result;
+          if (dbAdapter.query) {
+            result = await dbAdapter.query(
+              'SELECT * FROM memories WHERE "userId" = $1 ORDER BY "createdAt" ASC',
+              [accountId]
+            );
+          } else if (dbAdapter.db && dbAdapter.db.query) {
+            result = await dbAdapter.db.query(
+              'SELECT * FROM memories WHERE "userId" = $1 ORDER BY "createdAt" ASC',
+              [accountId]
+            );
+          } else {
+            throw new Error("PostgreSQL query method not found");
+          }
+          messages = result.rows || [];
+        } else {
+          // SQLite adapter
+          const db = dbAdapter.db || dbAdapter;
+          if (db.prepare) {
+            const stmt = db.prepare('SELECT * FROM memories WHERE userId = ? ORDER BY createdAt ASC');
+            messages = stmt.all(accountId);
+          } else if (db.all) {
+            messages = await db.all('SELECT * FROM memories WHERE userId = ? ORDER BY createdAt ASC', [accountId]);
+          } else {
+            throw new Error("SQLite query method not found");
+          }
+        }
+
+        elizaLogger.info(`Admin: Found ${messages.length} total messages for user ${username}`);
+
+        // Filter only chat messages (exclude system messages and other data)
+        let filteredCount = 0;
+        const chatMessages = messages.filter(msg => {
+          try {
+            if (!msg.content) {
+              return false;
+            }
+            
+            const content = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
+            const hasText = content && content.text;
+            
+            if (!hasText) {
+              return false;
+            }
+            
+            // Skip system messages and discovery responses
+            const text = content.text;
+            if (text.startsWith('[Discovery Response]') || 
+                text.startsWith('STAGE_TRANSITION') ||
+                text.includes('[Discovery Response]') ||
+                text.includes('STAGE_TRANSITION')) {
+              return false;
+            }
+            
+            filteredCount++;
+            return true;
+          } catch (parseError) {
+            return false;
+          }
+        }).map(msg => {
+          try {
+            const content = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
+            
+            // Determine if this is a user message or Grace message
+            // User messages have "source": "direct", Grace messages have "metadata"
+            const isUserMessage = content.source === 'direct';
+            const isGraceMessage = content.metadata && content.metadata.stage;
+            
+            return {
+              id: msg.id,
+              text: content.text,
+              role: isUserMessage ? 'user' : 'assistant', // user or Grace
+              timestamp: msg.createdAt,
+              roomId: msg.roomId,
+              agentId: msg.agentId
+            };
+          } catch (parseError) {
+            return null;
+          }
+        }).filter(Boolean);
+
+        elizaLogger.info(`Admin: Processed ${chatMessages.length} chat messages for user ${username}`);
+
+        return {
+          status: 200,
+          data: {
+            success: true,
+            messages: chatMessages,
+            user: {
+              id: accountId,
+              username: username,
+              email: user?.email || '',
+              createdAt: user?.createdAt || new Date()
+            }
+          }
+        };
+      } catch (dbError) {
+        elizaLogger.error('Database query error:', dbError);
+        return {
+          status: 500,
+          data: {
+            success: false,
+            message: 'Failed to retrieve chat history from database',
+            error: dbError.message
+          }
+        };
+      }
+    } catch (error) {
+      elizaLogger.error('Get chat history endpoint error:', error);
+      return {
+        status: 500,
+        data: {
+          success: false,
+          message: 'Internal server error',
+          error: error.message
+        }
+      };
+    }
   }
 } 
