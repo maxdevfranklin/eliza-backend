@@ -236,6 +236,8 @@ const startAgents = async () => {
       elizaLogger.info(`  POST http://localhost:${serverPort}/auth/login`);
       elizaLogger.info(`  POST http://localhost:${serverPort}/auth/verify`);
       elizaLogger.info(`  GET/PUT http://localhost:${serverPort}/agents/by-name`);
+      elizaLogger.info(`  GET http://localhost:${serverPort}/auth/admin/users`);
+      elizaLogger.info(`  GET http://localhost:${serverPort}/auth/admin/chat-history`);
     });
   }
 

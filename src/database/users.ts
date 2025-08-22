@@ -177,8 +177,8 @@ export class UserDatabase {
   async getUserByUsername(username: string): Promise<User | null> {
     try {
       const sql = this.isPostgres ?
-        `SELECT * FROM accounts WHERE username = $1` :
-        `SELECT * FROM accounts WHERE username = ?`;
+        `SELECT * FROM users WHERE username = $1` :
+        `SELECT * FROM users WHERE username = ?`;
       
       const row = await this.queryRow(sql, [username]);
       
@@ -194,6 +194,26 @@ export class UserDatabase {
       };
     } catch (error) {
       elizaLogger.error("Error getting user by username:", error);
+      throw error;
+    }
+  }
+
+  async getAccountByUsername(username: string): Promise<{ id: string; username: string } | null> {
+    try {
+      const sql = this.isPostgres ?
+        `SELECT id, username FROM accounts WHERE username = $1` :
+        `SELECT id, username FROM accounts WHERE username = ?`;
+      
+      const row = await this.queryRow(sql, [username]);
+      
+      if (!row) return null;
+      
+      return {
+        id: row.id,
+        username: row.username
+      };
+    } catch (error) {
+      elizaLogger.error("Error getting account by username:", error);
       throw error;
     }
   }
@@ -218,6 +238,63 @@ export class UserDatabase {
       };
     } catch (error) {
       elizaLogger.error("Error getting user by ID:", error);
+      throw error;
+    }
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    try {
+      elizaLogger.info('Database: Getting all users from users table...');
+      const sql = `SELECT * FROM users ORDER BY created_at DESC`;
+      
+      if (this.isPostgres) {
+        // For PostgreSQL adapter
+        let result;
+        if (this.dbAdapter.query) {
+          result = await this.dbAdapter.query(sql);
+        } else if (this.dbAdapter.db && this.dbAdapter.db.query) {
+          result = await this.dbAdapter.db.query(sql);
+        } else {
+          throw new Error("PostgreSQL query method not found");
+        }
+        
+        elizaLogger.info(`Database: Found ${result.rows?.length || 0} users in PostgreSQL`);
+        return (result.rows || []).map((row: any) => ({
+          id: row.id,
+          username: row.username,
+          email: row.email,
+          password: row.password,
+          createdAt: new Date(row.created_at),
+          updatedAt: new Date(row.updated_at)
+        }));
+      } else {
+        // For SQLite adapter
+        const db = this.dbAdapter.db || this.dbAdapter;
+        let rows;
+        if (db.prepare) {
+          rows = db.prepare(sql).all();
+        } else if (db.all) {
+          rows = await db.all(sql);
+        } else {
+          throw new Error("SQLite query method not found");
+        }
+        
+        elizaLogger.info(`Database: Found ${rows?.length || 0} users in SQLite`);
+        return rows.map((row: any) => ({
+          id: row.id,
+          username: row.username,
+          email: row.email,
+          password: row.password,
+          createdAt: new Date(row.created_at),
+          updatedAt: new Date(row.updated_at)
+        }));
+      }
+    } catch (error) {
+      elizaLogger.error("Error getting all users:", error);
+      // Check if it's a table doesn't exist error
+      if (error.message && error.message.includes('no such table')) {
+        elizaLogger.error("Users table does not exist. Please ensure the database is properly initialized.");
+      }
       throw error;
     }
   }
