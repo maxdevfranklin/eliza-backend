@@ -137,15 +137,15 @@ export class AuthServer {
         }
 
         try {
-          // First, get the actual user ID from the username
-          const user = await this.authRoutes.getUserDatabase().getUserByUsername(username);
-          if (!user) {
+          // First, get the actual account ID from the username
+          const account = await this.authRoutes.getUserDatabase().getAccountByUsername(username);
+          if (!account) {
             this.sendJsonResponse(res, 404, { success: false, message: 'User not found' });
             return true;
           }
 
-          const actualUserId = user.id;
-          elizaLogger.info(`Found user ID: ${actualUserId} for username: ${username}`);
+          const actualUserId = account.id;
+          elizaLogger.info(`Found account ID: ${actualUserId} for username: ${username}`);
 
           const userResponses = await getUserResponses(this.authRoutes.getRuntime(), {
             roomId,
