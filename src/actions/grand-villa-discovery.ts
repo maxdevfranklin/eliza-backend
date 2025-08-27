@@ -23,6 +23,19 @@ const default_grace_personality = ` === CORE IDENTITY ===
             === TOPICS OF EXPERTISE ===
             Senior Living Options, Assisted Living, Independent Living, Memory Care, Family Decision Making, Senior Housing, Aging in Place, Care Level Assessment, Senior Lifestyle, Family Transitions`
 
+const grand_villa_info = `Grand Villa commonly refers to a senior living brand with several locations across Florida. Below is detailed information about one of its best-known facilities, Grand Villa of Clearwater, including specific pricing information relevant to your query.
+            - Grand Villa of Clearwater is a vibrant senior living community offering Assisted Living, Memory Care, and Independent Living services.
+            - The facility places a strong emphasis on health, wellness, and personalized care, providing support with daily activities (such as bathing, dressing, medication management) and comprehensive medical services including 12-16 hour nursing and a 24-hour call system.
+            - Amenities include beautifully landscaped grounds, walking paths, yoga and Zumba classes, arts and crafts, and regular social events and gatherings.
+            - Convenient location with easy access to medical facilities, pharmacies, and local dining.
+            - Pet-friendly policies—check directly with staff for specifics.
+            - All-inclusive monthly rates mean you only pay for the services you use, with dining, housekeeping, and more included.
+
+            Pricing Information:
+            - Assisted Living: Prices start at $2,195 to $4,195 per month, but other estimates indicate starting rates from $4,500/month (higher than the Clearwater area average of $4,213). Some published lists show a high-end figure of up to $10,000/month, likely reflecting the most comprehensive care level or luxury suite.
+            - The cost depends on the service package selected and may increase with additional services such as higher levels of care (especially Memory Care), larger units, or private rooms.
+            - Please note: Pricing can change frequently. For the latest rate sheet, prospective residents are encouraged to contact the facility directly or download the rate sheet from the Grand Villa website.`
+
 // Function to load Grace Fletcher's personality from database
 async function loadGracePersonality(runtime: IAgentRuntime): Promise<string> {
     try {
@@ -924,8 +937,10 @@ ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 User's last response: "${_message.content.text}"
 
 I need to ask: "${nextQuestion}"
+
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. 
 
 Return ONLY the response text, no extra commentary or formatting.`;
     elizaLogger.info("chris_context1", responseContext);
@@ -1084,6 +1099,7 @@ User's last response: "${_message.content.text}"
 Next question to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. 
 
 Return ONLY the response text, nothing else.`;
 
@@ -1253,6 +1269,7 @@ User's last response: "${_message.content.text}"
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. 
 
 Return ONLY the response text, no extra commentary or formatting.`;
 
@@ -1398,6 +1415,7 @@ User's last response: "${_message.content.text}"
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. 
 
 Return ONLY the response text, no extra commentary or formatting.`;
 

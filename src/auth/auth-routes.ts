@@ -189,9 +189,9 @@ export class AuthRoutes {
 
       elizaLogger.info(`Deleting conversation history for username: ${userId}`);
 
-      // First, find the actual user ID from the username
-      const user = await this.userDb.getUserByUsername(userId);
-      if (!user) {
+      // First, find the actual account ID from the username
+      const account = await this.userDb.getAccountByUsername(userId);
+      if (!account) {
         return {
           status: 404,
           data: {
@@ -201,8 +201,8 @@ export class AuthRoutes {
         };
       }
 
-      const actualUserId = user.id;
-      elizaLogger.info(`Found user ID: ${actualUserId} for username: ${userId}`);
+      const actualUserId = account.id;
+      elizaLogger.info(`Found account ID: ${actualUserId} for username: ${userId}`);
 
       // Use database adapter directly for bulk deletion
       const dbAdapter = this.runtime.databaseAdapter as any;
@@ -243,7 +243,7 @@ export class AuthRoutes {
           }
         }
 
-        elizaLogger.info(`Successfully deleted ${deletedCount} messages for user ${userId} (ID: ${actualUserId})`);
+        elizaLogger.info(`Successfully deleted ${deletedCount} messages for user ${userId} (Account ID: ${actualUserId})`);
 
         return {
           status: 200,
