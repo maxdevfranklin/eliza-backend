@@ -1,6 +1,15 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
 import { discoveryStateProvider, saveUserResponse, getUserResponses, updateUserStatus } from "../providers/discovery-state.js";
 
+// Simple global variable to track current responseStatus
+let currentResponseStatus = "Normal situation";
+
+// Helper function to set global responseStatus
+function setGlobalResponseStatus(status: string) {
+    currentResponseStatus = status;
+    elizaLogger.info(`🌍 Set global responseStatus to: ${currentResponseStatus}`);
+}
+
 const default_grace_personality = ` === CORE IDENTITY ===
             You are Senior Sherpa, an AI guide specializing in helping families find the perfect senior living solution with empathy, patience, and expertise.
 
@@ -250,6 +259,9 @@ export const grandVillaDiscoveryAction: Action = {
     ) => {
         elizaLogger.info("🚀 Starting Grand Villa Discovery process");
         
+        // Reset global responseStatus at the start
+        currentResponseStatus = "Normal situation";
+        
         try {
             // Load Grace personality from database
             let gracePersonality;
@@ -352,13 +364,28 @@ export const grandVillaDiscoveryAction: Action = {
                 elizaLogger.warn("⚠️ Primary fallback failed - using secondary fallback");
             }
             
+            // Use the global responseStatus that was set by the stage handler
+            const responseStatus = currentResponseStatus;
+            elizaLogger.info(`📊 Using global responseStatus: ${responseStatus}`);
+            
+            // Add comprehensive logging for debugging responseStatus delivery
+            const callbackMetadata = {
+                stage: conversationStage,
+                actionName: "grand-villa-discovery",
+                reliability: "guaranteed",
+                responseStatus: responseStatus
+            };
+            
+            elizaLogger.info('🚀 === BACKEND CALLBACK DATA ===');
+            elizaLogger.info(`📝 Response text: ${response_text}`);
+            elizaLogger.info(`🏷️ Callback metadata: ${JSON.stringify(callbackMetadata)}`);
+            elizaLogger.info(`📊 Metadata keys: ${Object.keys(callbackMetadata)}`);
+            elizaLogger.info(`🔍 ResponseStatus being sent: ${responseStatus}`);
+            elizaLogger.info('================================');
+            
             _callback({ 
                 text: response_text,
-                metadata: {
-                    stage: conversationStage,
-                    actionName: "grand-villa-discovery",
-                    reliability: "guaranteed"
-                }
+                metadata: callbackMetadata
             });
             
             return true; // Always return true
@@ -367,13 +394,21 @@ export const grandVillaDiscoveryAction: Action = {
             elizaLogger.error("❌ Critical error - using ultimate fallback:", error);
             
             // Ultimate fallback that can never fail
+            const fallbackMetadata = {
+                actionName: "grand-villa-discovery",
+                fallback: "ultimate",
+                error: error.message,
+                responseStatus: "Normal situation"
+            };
+            
+            elizaLogger.info('🚨 === ULTIMATE FALLBACK CALLBACK ===');
+            elizaLogger.info(`📝 Fallback text: Hello! I'm Grace, and I'm here to help you explore senior living options for your family. How can I assist you today?`);
+            elizaLogger.info(`🏷️ Fallback metadata: ${JSON.stringify(fallbackMetadata)}`);
+            elizaLogger.info('=====================================');
+            
             _callback({
                 text: "Hello! I'm Grace, and I'm here to help you explore senior living options for your family. How can I assist you today?",
-                metadata: {
-                    actionName: "grand-villa-discovery",
-                    fallback: "ultimate",
-                    error: error.message
-                }
+                metadata: fallbackMetadata
             });
             
             return true; // Always return true even in ultimate fallback
@@ -940,10 +975,13 @@ I need to ask: "${nextQuestion}"
 
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. 
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
 
-Return ONLY the response text, no extra commentary or formatting.`;
-    elizaLogger.info("chris_context1", responseContext);
+Return a JSON object with two fields:
+1. "response": the response text
+2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
+
+Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
@@ -951,7 +989,14 @@ Return ONLY the response text, no extra commentary or formatting.`;
             modelClass: ModelClass.SMALL
         });
         
-        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        // Parse the AI response to extract response text and status
+        const analysis = analyzeResponseContext(aiResponse);
+        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        const status = analysis.status;
+        elizaLogger.info("chris_context", response, status)
+        
+        // Set global responseStatus for callback
+        setGlobalResponseStatus(status);
         
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
@@ -961,7 +1006,8 @@ Return ONLY the response text, no extra commentary or formatting.`;
                 text: response,
                 metadata: { 
                     askedQuestion: response,
-                    stage: "situation_discovery"
+                    stage: "situation_discovery",
+                    responseStatus: status
                 }
             }
         });
@@ -972,6 +1018,9 @@ Return ONLY the response text, no extra commentary or formatting.`;
         elizaLogger.error("Failed to generate AI response:", error);
         const fallbackResponse = `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         
+        // Set global responseStatus for callback (fallback to Normal situation)
+        setGlobalResponseStatus("Normal situation");
+        
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
             userId: _message.userId,
@@ -980,7 +1029,8 @@ Return ONLY the response text, no extra commentary or formatting.`;
                 text: fallbackResponse,
                 metadata: { 
                     askedQuestion: fallbackResponse,
-                    stage: "situation_discovery"
+                    stage: "situation_discovery",
+                    responseStatus: "Normal situation"
                 }
             }
         });
@@ -1099,9 +1149,13 @@ User's last response: "${_message.content.text}"
 Next question to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. 
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
 
-Return ONLY the response text, nothing else.`;
+Return a JSON object with two fields:
+1. "response": the response text
+2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
+
+Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
 
     try {
         const aiResponse = await generateText({
@@ -1110,7 +1164,13 @@ Return ONLY the response text, nothing else.`;
             modelClass: ModelClass.SMALL
         });
         
-        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        // Parse the AI response to extract response text and status
+        const analysis = analyzeResponseContext(aiResponse);
+        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        const status = analysis.status;
+        
+        // Set global responseStatus for callback
+        setGlobalResponseStatus(status);
         
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
@@ -1120,7 +1180,8 @@ Return ONLY the response text, nothing else.`;
                 text: response,
                 metadata: { 
                     askedQuestion: response,
-                    stage: "lifestyle_discovery"
+                    stage: "lifestyle_discovery",
+                    responseStatus: status
                 }
             }
         });
@@ -1131,6 +1192,9 @@ Return ONLY the response text, nothing else.`;
         elizaLogger.error("Failed to generate AI response:", error);
         const fallbackResponse = `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         
+        // Set global responseStatus for callback (fallback to Normal situation)
+        setGlobalResponseStatus("Normal situation");
+        
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
             userId: _message.userId,
@@ -1139,7 +1203,8 @@ Return ONLY the response text, nothing else.`;
                 text: fallbackResponse,
                 metadata: { 
                     askedQuestion: fallbackResponse,
-                    stage: "lifestyle_discovery"
+                    stage: "lifestyle_discovery",
+                    responseStatus: "Normal situation"
                 }
             }
         });
@@ -1269,30 +1334,68 @@ User's last response: "${_message.content.text}"
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. 
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
 
-Return ONLY the response text, no extra commentary or formatting.`;
+Return a JSON object with two fields:
+1. "response": the response text
+2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
 
-    const contextualResponse = await generateText({
-        runtime: _runtime,
-        context: responseContext,
-        modelClass: ModelClass.SMALL
-    });
-    
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: {
-            text: contextualResponse,
-            metadata: { 
-                askedQuestion: nextQuestion,
-                stage: "readiness_discovery"
+Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
+
+    try {
+        const aiResponse = await generateText({
+            runtime: _runtime,
+            context: responseContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        // Parse the AI response to extract response text and status
+        const analysis = analyzeResponseContext(aiResponse);
+        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        const status = analysis.status;
+        
+        // Set global responseStatus for callback
+        setGlobalResponseStatus(status);
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: response,
+                metadata: { 
+                    askedQuestion: nextQuestion,
+                    stage: "readiness_discovery",
+                    responseStatus: status
+                }
             }
-        }
-    });
-    
-    return contextualResponse;
+        });
+        
+        return response;
+        
+    } catch (error) {
+        elizaLogger.error("Failed to generate AI response:", error);
+        const fallbackResponse = `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
+        // Set global responseStatus for callback (fallback to Normal situation)
+        setGlobalResponseStatus("Normal situation");
+        
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+                text: fallbackResponse,
+                metadata: { 
+                    askedQuestion: nextQuestion,
+                    stage: "readiness_discovery",
+                    responseStatus: "Normal situation"
+                }
+            }
+        });
+        
+        return fallbackResponse;
+    }
 }
 
 // Priority Discovery Handler
@@ -1415,9 +1518,13 @@ User's last response: "${_message.content.text}"
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. 
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
 
-Return ONLY the response text, no extra commentary or formatting.`;
+Return a JSON object with two fields:
+1. "response": the response text
+2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
+
+Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
 
     try {
         const aiResponse = await generateText({
@@ -1426,7 +1533,13 @@ Return ONLY the response text, no extra commentary or formatting.`;
             modelClass: ModelClass.SMALL
         });
         
-        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        // Parse the AI response to extract response text and status
+        const analysis = analyzeResponseContext(aiResponse);
+        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        const status = analysis.status;
+        
+        // Set global responseStatus for callback
+        setGlobalResponseStatus(status);
         
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
@@ -1436,7 +1549,8 @@ Return ONLY the response text, no extra commentary or formatting.`;
                 text: response,
                 metadata: { 
                     askedQuestion: response,
-                    stage: "priorities_discovery"
+                    stage: "priorities_discovery",
+                    responseStatus: status
                 }
             }
         });
@@ -1447,6 +1561,9 @@ Return ONLY the response text, no extra commentary or formatting.`;
         elizaLogger.error("Failed to generate AI response:", error);
         const fallbackResponse = `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         
+        // Set global responseStatus for callback (fallback to Normal situation)
+        setGlobalResponseStatus("Normal situation");
+        
         await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
             userId: _message.userId,
@@ -1455,7 +1572,8 @@ Return ONLY the response text, no extra commentary or formatting.`;
                 text: fallbackResponse,
                 metadata: { 
                     askedQuestion: fallbackResponse,
-                    stage: "priorities_discovery"
+                    stage: "priorities_discovery",
+                    responseStatus: "Normal situation"
                 }
             }
         });
@@ -2639,4 +2757,37 @@ async function getVisitTimingInfo(_runtime: IAgentRuntime, _message: Memory): Pr
     }
     
     return null;
+}
+
+// Helper function to analyze response context and extract response text and status
+interface ResponseAnalysis {
+    responseText: string;
+    status: string;
+}
+
+function analyzeResponseContext(aiResponse: string): ResponseAnalysis {
+    let responseText: string;
+    let status: string = "Normal situation"; // default status
+    
+    try {
+        // Try to parse as JSON first
+        const parsedResponse = JSON.parse(aiResponse);
+        responseText = parsedResponse.response || aiResponse;
+        status = parsedResponse.status || "Normal situation";
+        
+        // Validate status values
+        if (status !== "Unexpected situation" && status !== "Normal situation") {
+            status = "Normal situation"; // fallback to default if invalid status
+        }
+        
+    } catch (parseError) {
+        // If JSON parsing fails, use the raw response as fallback
+        responseText = aiResponse;
+        status = "Normal situation";
+    }
+    
+    return {
+        responseText,
+        status
+    };
 }
