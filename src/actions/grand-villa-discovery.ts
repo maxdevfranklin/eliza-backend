@@ -32,18 +32,7 @@ const default_grace_personality = ` === CORE IDENTITY ===
             === TOPICS OF EXPERTISE ===
             Senior Living Options, Assisted Living, Independent Living, Memory Care, Family Decision Making, Senior Housing, Aging in Place, Care Level Assessment, Senior Lifestyle, Family Transitions`
 
-const grand_villa_info = `Grand Villa commonly refers to a senior living brand with several locations across Florida. Below is detailed information about one of its best-known facilities, Grand Villa of Clearwater, including specific pricing information relevant to your query.
-            - Grand Villa of Clearwater is a vibrant senior living community offering Assisted Living, Memory Care, and Independent Living services.
-            - The facility places a strong emphasis on health, wellness, and personalized care, providing support with daily activities (such as bathing, dressing, medication management) and comprehensive medical services including 12-16 hour nursing and a 24-hour call system.
-            - Amenities include beautifully landscaped grounds, walking paths, yoga and Zumba classes, arts and crafts, and regular social events and gatherings.
-            - Convenient location with easy access to medical facilities, pharmacies, and local dining.
-            - Pet-friendly policies—check directly with staff for specifics.
-            - All-inclusive monthly rates mean you only pay for the services you use, with dining, housekeeping, and more included.
 
-            Pricing Information:
-            - Assisted Living: Prices start at $2,195 to $4,195 per month, but other estimates indicate starting rates from $4,500/month (higher than the Clearwater area average of $4,213). Some published lists show a high-end figure of up to $10,000/month, likely reflecting the most comprehensive care level or luxury suite.
-            - The cost depends on the service package selected and may increase with additional services such as higher levels of care (especially Memory Care), larger units, or private rooms.
-            - Please note: Pricing can change frequently. For the latest rate sheet, prospective residents are encouraged to contact the facility directly or download the rate sheet from the Grand Villa website.`
 
 // Function to load Grace Fletcher's personality from database
 async function loadGracePersonality(runtime: IAgentRuntime): Promise<string> {
@@ -115,6 +104,50 @@ async function loadGracePersonality(runtime: IAgentRuntime): Promise<string> {
         elizaLogger.error("Error loading Grace personality from database:", error);
         // Fallback to a basic personality if database fails
         return default_grace_personality;
+    }
+}
+
+// Function to load Grand Villa information from database
+async function loadGrandVillaInfo(runtime: IAgentRuntime): Promise<string> {
+    try {
+        // Query the agents table for Grace Fletcher's data to get grand_info
+        const sql = `SELECT grand_info FROM public.agents WHERE id='5bdc9044-4801-0b70-aa33-b16adcf4b92b'::uuid;`;
+        
+        const dbAdapter: any = runtime.databaseAdapter as any;
+        let result;
+        
+        if (dbAdapter.query) {
+            result = await dbAdapter.query(sql);
+        } else if (dbAdapter.db && dbAdapter.db.query) {
+            result = await dbAdapter.db.query(sql);
+        } else {
+            throw new Error("Database query method not found");
+        }
+        
+        const agent = result.rows?.[0] || result[0];
+        
+        if (!agent || !agent.grand_info) {
+            throw new Error("Grand Villa information not found in database");
+        }
+        
+        elizaLogger.info(`Successfully loaded Grand Villa information from database:${agent.grand_info}`);
+        return agent.grand_info;
+        
+    } catch (error) {
+        elizaLogger.error("Error loading Grand Villa information from database:", error);
+        // Fallback to hardcoded information if database fails
+        return `Grand Villa commonly refers to a senior living brand with several locations across Florida. Below is detailed information about one of its best-known facilities, Grand Villa of Clearwater, including specific pricing information relevant to your query.
+            - Grand Villa of Clearwater is a vibrant senior living community offering Assisted Living, Memory Care, and Independent Living services.
+            - The facility places a strong emphasis on health, wellness, and personalized care, providing support with daily activities (such as bathing, dressing, medication management) and comprehensive medical services including 12-16 hour nursing and a 24-hour call system.
+            - Amenities include beautifully landscaped grounds, walking paths, yoga and Zumba classes, arts and crafts, and regular social events and gatherings.
+            - Convenient location with easy access to medical facilities, pharmacies, and local dining.
+            - Pet-friendly policies—check directly with staff for specifics.
+            - All-inclusive monthly rates mean you only pay for the services you use, with dining, housekeeping, and more included.
+
+            Pricing Information:
+            - Assisted Living: Prices start at $2,195 to $4,195 per month, but other estimates indicate starting rates from $4,500/month (higher than the Clearwater area average of $4,213). Some published lists show a high-end figure of up to $10,000/month, likely reflecting the most comprehensive care level or luxury suite.
+            - The cost depends on the service package selected and may increase with additional services such as higher levels of care (especially Memory Care), larger units, or private rooms.
+            - Please note: Pricing can change frequently. For the latest rate sheet, prospective residents are encouraged to contact the facility directly or download the rate sheet from the Grand Villa website.`;
     }
 }
 
@@ -268,8 +301,28 @@ export const grandVillaDiscoveryAction: Action = {
             try {
                 gracePersonality = await loadGracePersonality(_runtime);
             } catch (error) {
-                elizaLogger.warn("Using fallback personality:", error);
+                elizaLogger.error("Failed to load Grace personality, using default:", error);
                 gracePersonality = default_grace_personality;
+            }
+
+            // Load Grand Villa information from database
+            let grandVillaInfo;
+            try {
+                grandVillaInfo = await loadGrandVillaInfo(_runtime);
+            } catch (error) {
+                elizaLogger.error("Failed to load Grand Villa info, using default:", error);
+                grandVillaInfo = `Grand Villa commonly refers to a senior living brand with several locations across Florida. Below is detailed information about one of its best-known facilities, Grand Villa of Clearwater, including specific pricing information relevant to your query.
+            - Grand Villa of Clearwater is a vibrant senior living community offering Assisted Living, Memory Care, and Independent Living services.
+            - The facility places a strong emphasis on health, wellness, and personalized care, providing support with daily activities (such as bathing, dressing, medication management) and comprehensive medical services including 12-16 hour nursing and a 24-hour call system.
+            - Amenities include beautifully landscaped grounds, walking paths, yoga and Zumba classes, arts and crafts, and regular social events and gatherings.
+            - Convenient location with easy access to medical facilities, pharmacies, and local dining.
+            - Pet-friendly policies—check directly with staff for specifics.
+            - All-inclusive monthly rates mean you only pay for the services you use, with dining, housekeeping, and more included.
+
+            Pricing Information:
+            - Assisted Living: Prices start at $2,195 to $4,195 per month, but other estimates indicate starting rates from $4,500/month (higher than the Clearwater area average of $4,213). Some published lists show a high-end figure of up to $10,000/month, likely reflecting the most comprehensive care level or luxury suite.
+            - The cost depends on the service package selected and may increase with additional services such as higher levels of care (especially Memory Care), larger units, or private rooms.
+            - Please note: Pricing can change frequently. For the latest rate sheet, prospective residents are encouraged to contact the facility directly or download the rate sheet from the Grand Villa website.`;
             }
             
             // Get discovery state with safe fallback
@@ -315,25 +368,25 @@ export const grandVillaDiscoveryAction: Action = {
                         response_text = await handleTrustBuilding(_runtime, _message, _state, gracePersonality);
                         break;
                     case "situation_discovery":
-                        response_text = await handleSituationQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
+                        response_text = await handleSituationQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
                         break;
                     case "lifestyle_discovery":
-                        response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
+                        response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
                         break;
                     case "readiness_discovery":
-                        response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
+                        response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
                         break;
                     case "priorities_discovery":
-                        response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState, gracePersonality);
+                        response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
                         break;
                     case "needs_matching":
-                        response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState, gracePersonality);
+                        response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
                         break;
                     case "schedule_visit":
-                        response_text = await handleScheduleVisit(_runtime, _message, _state, discoveryState, gracePersonality);
+                        response_text = await handleScheduleVisit(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
                         break;
                     default:
-                        response_text = await handleGeneralInquiry(_runtime, _message, _state, gracePersonality);
+                        response_text = await handleGeneralInquiry(_runtime, _message, _state, gracePersonality, grandVillaInfo);
                 }
                 
                 // After running the stage handler, check if the stage has been updated
@@ -865,7 +918,7 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 }
 
 // Situation Discovery Handler
-async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
+async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "situation", _message.content.text);
@@ -954,7 +1007,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
             ..._message,
             content: { text: "" }
         };
-        return await handleLifestyleQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
+        return await handleLifestyleQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
     }
     
     // Generate AI response that asks the next unanswered question with context
@@ -975,7 +1028,7 @@ I need to ask: "${nextQuestion}"
 
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grandVillaInfo}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
 
 Return a JSON object with two fields:
 1. "response": the response text
@@ -1040,12 +1093,13 @@ Format: {"response": "your response text here", "status": "Unexpected situation"
 }
 
 // Lifestyle Discovery Handler  
-async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
+async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     // The 3 basic lifestyle questions we need to collect answers for
     const lifestyleQuestions = [
         "Tell me about your loved one. What does a typical day look like for them?",
         "What does he/she enjoy doing?"
     ];
+    elizaLogger.info(`@chris_grand_info: ${grandVillaInfo}`);
     
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
@@ -1129,7 +1183,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
             ..._message,
             content: { text: "" }
         };
-        return await handleReadinessQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
+        return await handleReadinessQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
     }
     
     // Determine which question to ask next and generate a contextual response
@@ -1149,7 +1203,7 @@ User's last response: "${_message.content.text}"
 Next question to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grandVillaInfo}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
 
 Return a JSON object with two fields:
 1. "response": the response text
@@ -1214,7 +1268,7 @@ Format: {"response": "your response text here", "status": "Unexpected situation"
 }
 
 // Readiness Discovery Handler
-async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
+async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     // The 3 basic readiness questions we need to collect answers for
     const readinessQuestions = [
         "Is your loved one aware that you're looking at options?",
@@ -1309,7 +1363,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
             ..._message,
             content: { text: "" }
         };
-        return await handlePriorityQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
+        return await handlePriorityQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
     }
     
     elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in readiness_discovery`);
@@ -1334,7 +1388,7 @@ User's last response: "${_message.content.text}"
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grandVillaInfo}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
 
 Return a JSON object with two fields:
 1. "response": the response text
@@ -1399,7 +1453,7 @@ Format: {"response": "your response text here", "status": "Unexpected situation"
 }
 
 // Priority Discovery Handler
-async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
+async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     // The 3 priority questions we need to collect answers for
     const priorityQuestions = [
         "What's most important to you regarding the community you may choose?",
@@ -1493,7 +1547,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
             ..._message,
             content: { text: "" }
         };
-        return await handleNeedsMatching(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
+        return await handleNeedsMatching(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
     }
     
     elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in priorities_discovery`);
@@ -1518,7 +1572,7 @@ User's last response: "${_message.content.text}"
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grand_villa_info}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
+- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grandVillaInfo}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
 
 Return a JSON object with two fields:
 1. "response": the response text
@@ -1583,7 +1637,7 @@ Format: {"response": "your response text here", "status": "Unexpected situation"
 }
 
 // Needs Matching Handler
-async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
+async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     // Check if this is a user response (not the initial transition)
     const isUserResponse = _message.content.text && _message.userId !== _message.agentId;
     
@@ -1710,11 +1764,11 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         ..._message,
         content: { text: "" }
     };
-    return await handleScheduleVisit(_runtime, transitionMessage, _state, discoveryState, gracePersonality);
+            return await handleScheduleVisit(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
 }
 
 // Info Sharing Handler
-async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
+async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     // Save user response from this stage
     if (_message.content.text && _message.userId !== _message.agentId) {
         await saveUserResponse(_runtime, _message, "info_sharing", _message.content.text);
@@ -1827,7 +1881,7 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
 
 
 // Schedule Visit Handler
-async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
+async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     elizaLogger.info("Handling schedule visit stage");
     
     // Check if this is the first interaction in schedule_visit stage
@@ -2712,7 +2766,7 @@ function getDefaultPriorityQuestion(questionType: string): string {
     }
 }
 
-async function handleGeneralInquiry(_runtime: IAgentRuntime, _message: Memory, _state: State, gracePersonality: string): Promise<string> {
+async function handleGeneralInquiry(_runtime: IAgentRuntime, _message: Memory, _state: State, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     return "I'd be happy to help you learn more about Grand Villa. What would you like to know?";
 }
 
