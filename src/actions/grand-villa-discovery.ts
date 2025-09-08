@@ -162,7 +162,7 @@ interface QAEntry {
 interface ComprehensiveRecord {
     contact_info: {
         name?: string;
-        phone?: string;
+        location?: string;
         loved_one_name?: string;
         collected_at: string;
     };
@@ -504,8 +504,8 @@ async function getComprehensiveRecord(_runtime: IAgentRuntime, _message: Memory)
                         if (record.contact_info.name !== null && record.contact_info.name !== undefined) {
                             contactUpdate.name = record.contact_info.name;
                         }
-                        if (record.contact_info.phone !== null && record.contact_info.phone !== undefined) {
-                            contactUpdate.phone = record.contact_info.phone;
+                        if (record.contact_info.location !== null && record.contact_info.location !== undefined) {
+                            contactUpdate.location = record.contact_info.location;
                         }
                         if (record.contact_info.loved_one_name !== null && record.contact_info.loved_one_name !== undefined) {
                             contactUpdate.loved_one_name = record.contact_info.loved_one_name;
@@ -698,8 +698,8 @@ async function displayQASummary(_runtime: IAgentRuntime, _message: Memory): Prom
     if (contactInfo?.name) {
         elizaLogger.info(`👤 Name: ${contactInfo.name}`);
     }
-    if (contactInfo?.phone) {
-        elizaLogger.info(`📞 Phone: ${contactInfo.phone}`);
+    if (contactInfo?.location) {
+        elizaLogger.info(`📞 Location: ${contactInfo.location}`);
     }
     elizaLogger.info(`📝 Total Q&A Entries: ${qaEntries.length}`);
     elizaLogger.info(`==================================`);
@@ -749,61 +749,61 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
         // Check if we already have any contact info stored
         let existingContactInfo = await getContactInfo(_runtime, _message);
         
-        // Try to extract name, phone number, and loved one's name from ALL trust building responses
+        // Try to extract name, location, and loved one's name from ALL trust building responses
         const extractionContext = `Please extract the user's information from these responses: "${allTrustBuildingText}"
-
+            
             Look for:
             - User's full name (first and last name)
-            - Phone number (any format: xxx-xxx-xxxx, (xxx) xxx-xxxx, xxx.xxx.xxxx, xxxxxxxxxx)
+            - Location (city, state, or zip code)
             - Name of their loved one/family member (the person they're seeking senior living for - could be "my mom", "my father", "John", "Mary", etc.)
             
-            ${existingContactInfo ? `Note: We may already have some info - Name: ${existingContactInfo.name || 'none'}, Phone: ${existingContactInfo.phone || 'none'}, Loved One: ${existingContactInfo.loved_one_name || 'none'}` : ''}
+            ${existingContactInfo ? `Note: We may already have some info - Name: ${existingContactInfo.name || 'none'}, Location: ${existingContactInfo.location || 'none'}, Loved One: ${existingContactInfo.loved_one_name || 'none'}` : ''}
             
             Return your response in this exact JSON format:
             {
                 "name": "extracted user's full name or null if not found",
-                "phone": "extracted phone number in clean format (xxx-xxx-xxxx) or null if not found",
+                "location": "extracted location such as city, state, or zip code or null if not found",
                 "loved_one_name": "extracted loved one's name or null if not found",
                 "foundName": true/false,
-                "foundPhone": true/false,
+                "foundLocation": true/false,
                 "foundLovedOneName": true/false
             }
             
             Make sure to return ONLY valid JSON, no additional text.`;
-
+        
         try {
             const aiResponse = await generateText({
                 runtime: _runtime,
                 context: extractionContext,
                 modelClass: ModelClass.SMALL
             });
-
+            
             const parsed = JSON.parse(aiResponse);
             
             // Merge with existing info if we have any
             let finalName = parsed.foundName && parsed.name ? parsed.name : (existingContactInfo?.name || null);
-            let finalPhone = parsed.foundPhone && parsed.phone ? parsed.phone : (existingContactInfo?.phone || null);
+            let finalLocation = parsed.foundLocation && parsed.location ? parsed.location : (existingContactInfo?.location || null);
             let finalLovedOneName = parsed.foundLovedOneName && parsed.loved_one_name ? parsed.loved_one_name : (existingContactInfo?.loved_one_name || null);
             
             elizaLogger.info(`=== CONTACT INFO EXTRACTION ===`);
             elizaLogger.info(`Extracted name: ${parsed.foundName ? parsed.name : 'NO'}`);
-            elizaLogger.info(`Extracted phone: ${parsed.foundPhone ? parsed.phone : 'NO'}`);
+            elizaLogger.info(`Extracted location: ${parsed.foundLocation ? parsed.location : 'NO'}`);
             elizaLogger.info(`Extracted loved one: ${parsed.foundLovedOneName ? parsed.loved_one_name : 'NO'}`);
             elizaLogger.info(`Final name: ${finalName || 'NO'}`);
-            elizaLogger.info(`Final phone: ${finalPhone || 'NO'}`);
+            elizaLogger.info(`Final location: ${finalLocation || 'NO'}`);
             elizaLogger.info(`Final loved one: ${finalLovedOneName || 'NO'}`);
             elizaLogger.info(`===============================`);
-
+            
             // If we found all three pieces of info, save them and proceed
-            if (finalName && finalPhone && finalLovedOneName) {
+            if (finalName && finalLocation && finalLovedOneName) {
                 elizaLogger.info(`=== SAVING CONTACT INFO TO COMPREHENSIVE RECORD ===`);
-                elizaLogger.info(`Name: ${finalName}, Phone: ${finalPhone}, Loved One: ${finalLovedOneName}`);
+                elizaLogger.info(`Name: ${finalName}, Location: ${finalLocation}, Loved One: ${finalLovedOneName}`);
                 
                 // Save contact information to comprehensive record
                 await updateComprehensiveRecord(_runtime, _message, {
                     contact_info: {
                         name: finalName,
-                        phone: finalPhone,
+                        location: finalLocation,
                         loved_one_name: finalLovedOneName,
                         collected_at: new Date().toISOString()
                     }
@@ -831,14 +831,14 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
             }
             
             // Save partial contact info if we have new information
-            if (finalName || finalPhone || finalLovedOneName) {
+            if (finalName || finalLocation || finalLovedOneName) {
                 elizaLogger.info(`=== SAVING PARTIAL CONTACT INFO TO COMPREHENSIVE RECORD ===`);
-                elizaLogger.info(`Name: ${finalName || 'not provided'}, Phone: ${finalPhone || 'not provided'}, Loved One: ${finalLovedOneName || 'not provided'}`);
+                elizaLogger.info(`Name: ${finalName || 'not provided'}, Location: ${finalLocation || 'not provided'}, Loved One: ${finalLovedOneName || 'not provided'}`);
                 
                 await updateComprehensiveRecord(_runtime, _message, {
                     contact_info: {
                         name: finalName,
-                        phone: finalPhone,
+                        location: finalLocation,
                         loved_one_name: finalLovedOneName,
                         collected_at: new Date().toISOString()
                     }
@@ -851,11 +851,11 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
             let missingInfoResponse = "";
             const missingItems = [];
             if (!finalName) missingItems.push("your name");
-            if (!finalPhone) missingItems.push("your phone number");
+            if (!finalLocation) missingItems.push("your location");
             if (!finalLovedOneName) missingItems.push("your loved one's name");
             
             if (missingItems.length === 3) {
-                missingInfoResponse = "I'd love to help you! To get started, could I get your name, phone number, and the name of your loved one you're looking for senior living options for?";
+                missingInfoResponse = "I'd love to help you! To get started, could I get your name, location, and the name of your loved one you're looking for senior living options for?";
             } else if (missingItems.length === 2) {
                 missingInfoResponse = `Thanks for sharing! Could I also get ${missingItems.join(" and ")}?`;
             } else if (missingItems.length === 1) {
@@ -880,7 +880,7 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
         } catch (error) {
             elizaLogger.error("Error extracting contact info:", error);
             // Fallback to asking for all contact info
-            const fallbackResponse = "I'd love to help you! To get started, could I get your name, phone number, and the name of your loved one you're looking for senior living options for?";
+            const fallbackResponse = "I'd love to help you! To get started, could I get your name, location, and the name of your loved one you're looking for senior living options for?";
             
             await _runtime.messageManager.createMemory({
                 roomId: _message.roomId,
@@ -898,8 +898,8 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
         }
     }
     
-    // First interaction - ask for name, phone, and loved one's name
-    const initialResponse = "Hello! I'm Grace, and I'm here to help you explore senior living options for your family. To get started, could I get your name, phone number, and the name of your loved one you're looking for senior living options for?";
+    // First interaction - ask for name, location, and loved one's name
+    const initialResponse = "Hello! I'm Grace, and I'm here to help you explore senior living options for your family. To get started, could I get your name, location, and the name of your loved one you're looking for senior living options for?";
     
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
@@ -930,6 +930,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     
     // Create personalized questions using loved one's name
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     const situationQuestions = [
         "Move to next step",
         "What made you decide to reach out about senior living today?",
@@ -1022,13 +1023,22 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
 Progress: ${currentAnsweredCount}/4 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
-User's last response: "${_message.content.text}"
+
 
 I need to ask: "${nextQuestion}"
 
+If the user's last response: "${_message.content.text}" is just the answer to the previous question, "status" is "Normal situation", keep the 30~50 words and if the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, "status" is "Unexpected situation", keep the words 60~100.
+
+1. If the "status" is "Normal situation":
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grandVillaInfo}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
+
+2. If status is "Unexpected Situation":
+- Look at the last message: "${_message.content.text}". If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}". If info is missing, search online and give the most accurate answer.
+- For pricing questions, from grandvilla_information I shared, find the closest Grand villa from the user's location: "${location}" and share that info of pricing and exact name. don't create new one on user's location, only find one I shared on Pricing info of grandvilla_information.
+- If they complain about "too many questions" or "when it ends," empathize and explain that it's just to find their perfect match—maybe crack a light joke.
+- Smoothly and playfully lead into ${nextQuestion} so it feels like part of a friendly chat, not an interrogation.
+- Keep words under 60~100.
 
 Return a JSON object with two fields:
 1. "response": the response text
@@ -1112,6 +1122,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     
     // Get comprehensive record to see what questions have been asked/answered
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -1194,8 +1205,8 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     const previousAnswers = lifestyleQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's lifestyle and daily activities. 
-
-Progress: ${currentAnsweredCount}/3 questions answered so far.
+    
+Progress: ${currentAnsweredCount}/2 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
 User's last response: "${_message.content.text}"
@@ -1203,14 +1214,25 @@ User's last response: "${_message.content.text}"
 Next question to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grandVillaInfo}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
+- If the user's last response: "${_message.content.text}" is just the answer to the previous question, "status" is "Normal situation", keep the 30~50 words and if the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, "status" is "Unexpected situation", keep the words 60~100.
+
+1. If the "status" is "Normal situation":
+"${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+
+2. If status is "Unexpected Situation":
+- Look at the last message: "${_message.content.text}". If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}". If info is missing, search online and give the most accurate answer.
+- For pricing questions, from grandvilla_information I shared, find the closest Grand villa from the user's location: "${location}" and share that info of pricing and exact name. don't create new one on user's location, only find one I shared on Pricing info of grandvilla_information.
+- If they complain about "too many questions" or "when it ends," empathize and explain that it's just to find their perfect match—maybe crack a light joke.
+- Smoothly and playfully lead into ${nextQuestion} so it feels like part of a friendly chat, not an interrogation.
+- Keep words under 60~100.
 
 Return a JSON object with two fields:
 1. "response": the response text
 2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
 
 Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
-
+    
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
@@ -1286,6 +1308,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     
     // Get comprehensive record to see what questions have been asked/answered
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -1379,7 +1402,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     const previousAnswers = readinessQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's readiness and family involvement.
-
+    
 Progress: ${currentAnsweredCount}/3 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
@@ -1388,14 +1411,25 @@ User's last response: "${_message.content.text}"
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grandVillaInfo}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
+- If the user's last response: "${_message.content.text}" is just the answer to the previous question, "status" is "Normal situation", keep the 30~50 words and if the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, "status" is "Unexpected situation", keep the words 60~100.
+
+1. If the "status" is "Normal situation":
+"${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+
+2. If status is "Unexpected Situation":
+- Look at the last message: "${_message.content.text}". If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}". If info is missing, search online and give the most accurate answer.
+- For pricing questions, from grandvilla_information I shared, find the closest Grand villa from the user's location: "${location}" and share that info of pricing and exact name. don't create new one on user's location, only find one I shared on Pricing info of grandvilla_information.
+- If they complain about "too many questions" or "when it ends," empathize and explain that it's just to find their perfect match—maybe crack a light joke.
+- Smoothly and playfully lead into ${nextQuestion} so it feels like part of a friendly chat, not an interrogation.
+- Keep words under 60~100.
 
 Return a JSON object with two fields:
 1. "response": the response text
 2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
 
 Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
-
+    
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
@@ -1470,6 +1504,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     
     // Get comprehensive record to see what questions have been asked/answered
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -1563,7 +1598,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     const previousAnswers = prioritiesQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their priorities and what's important in choosing a senior living community.
-
+    
 Progress: ${currentAnsweredCount}/2 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
@@ -1572,14 +1607,25 @@ User's last response: "${_message.content.text}"
 I need to ask: "${nextQuestion}"
 "${gracePersonality}"
 - Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, first respond in a caring and understanding way, or give a full, correct answer based on ${grandVillaInfo}. After answering, transition smoothly to the next planned question by finding common ground with what the user just shared, making the shift feel natural and conversational. Only in this case, make the total response within 60–70 words. And return "Unexpected situation" as status. And other cases, return "Normal situation" as default.
+- If the user's last response: "${_message.content.text}" is just the answer to the previous question, "status" is "Normal situation", keep the 30~50 words and if the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, "status" is "Unexpected situation", keep the words 60~100.
+
+1. If the "status" is "Normal situation":
+"${gracePersonality}"
+- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+
+2. If status is "Unexpected Situation":
+- Look at the last message: "${_message.content.text}". If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}". If info is missing, search online and give the most accurate answer.
+- For pricing questions, from grandvilla_information I shared, find the closest Grand villa from the user's location: "${location}" and share that info of pricing and exact name. don't create new one on user's location, only find one I shared on Pricing info of grandvilla_information.
+- If they complain about "too many questions" or "when it ends," empathize and explain that it's just to find their perfect match—maybe crack a light joke.
+- Smoothly and playfully lead into ${nextQuestion} so it feels like part of a friendly chat, not an interrogation.
+- Keep words under 60~100.
 
 Return a JSON object with two fields:
 1. "response": the response text
 2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
 
 Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
-
+    
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
@@ -2406,7 +2452,7 @@ async function getUserFirstName(_runtime: IAgentRuntime, _message: Memory): Prom
 }
 
 // Helper function to get stored contact information
-async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{name?: string, phone?: string, loved_one_name?: string} | null> {
+async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{name?: string, location?: string, loved_one_name?: string} | null> {
     try {
         // First try to get from comprehensive record
         const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -2414,10 +2460,10 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
             const contactInfo = comprehensiveRecord.contact_info;
             elizaLogger.info(`getContactInfo - RAW comprehensive record: ${JSON.stringify(comprehensiveRecord)}`);
             elizaLogger.info(`getContactInfo - RAW contact_info: ${JSON.stringify(contactInfo)}`);
-            elizaLogger.info(`getContactInfo - from comprehensive record: Name=${contactInfo.name}, Phone=${contactInfo.phone}, Loved One=${contactInfo.loved_one_name}`);
+            elizaLogger.info(`getContactInfo - from comprehensive record: Name=${contactInfo.name}, Location=${contactInfo.location}, Loved One=${contactInfo.loved_one_name}`);
             return { 
                 name: contactInfo.name, 
-                phone: contactInfo.phone, 
+                location: contactInfo.location, 
                 loved_one_name: contactInfo.loved_one_name 
             };
         }
@@ -2434,7 +2480,7 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
             const latestContactInfo = contactInfoArray[contactInfoArray.length - 1];
             elizaLogger.info(`getContactInfo - latestContactInfo (raw): ${latestContactInfo}`);
             
-            // Handle the messy format: "[Discovery Response] {"name":"Chris","phone":"..."}"
+            // Handle the messy format: "[Discovery Response] {"name":"Chris","location":"..."}"
             let cleanJsonString = latestContactInfo;
             
             // If it starts with "[Discovery Response]", extract the JSON part
@@ -2448,8 +2494,8 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
             
             const parsed = JSON.parse(cleanJsonString);
             elizaLogger.info(`getContactInfo - parsed: ${JSON.stringify(parsed)}`);
-            elizaLogger.info(`Retrieved contact info: Name=${parsed.name}, Phone=${parsed.phone}, Loved One=${parsed.loved_one_name}`);
-            return { name: parsed.name, phone: parsed.phone, loved_one_name: parsed.loved_one_name };
+            elizaLogger.info(`Retrieved contact info: Name=${parsed.name}, Location=${parsed.location}, Loved One=${parsed.loved_one_name}`);
+            return { name: parsed.name, location: parsed.location, loved_one_name: parsed.loved_one_name };
         }
         
         elizaLogger.info(`getContactInfo - no contact info found`);
