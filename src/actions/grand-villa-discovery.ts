@@ -1019,44 +1019,50 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     const previousAnswers = situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing their senior living situation.
-
+    
 Progress: ${currentAnsweredCount}/4 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
+I need to ask next: "${nextQuestion}"
 
+=== STATUS CLASSIFICATION RULES ===
+Always decide if this is a "Normal situation" or an "Unexpected situation":
+- "Normal situation" → The user simply answers the question, shares basic info about their loved one, or responds calmly without asking for extra info.
+- "Unexpected situation" → The user:
+  • Asks a question or want to know about something (pricing, services, amenities, locations, policies, etc.)
+  • Requests clarification or more details.
+  • Expresses frustration, confusion, or complains ("too many questions", "when does this end?")
+  • Shares an emotional reaction that needs empathy (sadness, worry, humor).
+  • Changes topic or wants to know about something outside the current question.
 
-I need to ask: "${nextQuestion}"
+=== RESPONSE INSTRUCTIONS ===
+1. If status is "Normal situation":
+   - Stay warm and personal.
+   - Naturally use ${userName} and ${lovedOneName} in the reply.
+   - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
 
-If the user's last response: "${_message.content.text}" is just the answer to the previous question, "status" is "Normal situation", keep the 30~50 words and if the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, "status" is "Unexpected situation", keep the words 60~100.
+2. If status is "Unexpected situation":
+   - Look at the last message: "${_message.content.text}".
+   - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+     If info is missing, search online and give the most accurate answer.
+   - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+   - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+   - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+   - Keep response within 60–100 words.
 
-1. If the "status" is "Normal situation":
-"${gracePersonality}"
-- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-
-2. If status is "Unexpected Situation":
-- Look at the last message: "${_message.content.text}". If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}". If info is missing, search online and give the most accurate answer.
-- For pricing questions, from grandvilla_information I shared, find the closest Grand villa from the user's location: "${location}" and share that info of pricing and exact name. don't create new one on user's location, only find one I shared on Pricing info of grandvilla_information.
-- If they complain about "too many questions" or "when it ends," empathize and explain that it's just to find their perfect match—maybe crack a light joke.
-- Smoothly and playfully lead into ${nextQuestion} so it feels like part of a friendly chat, not an interrogation.
-- Keep words under 60~100.
-
-Return a JSON object with two fields:
-1. "response": the response text
-2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
-
-Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
+Return ONLY a JSON object:
+{"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
             context: responseContext,
-            modelClass: ModelClass.SMALL
+            modelClass: ModelClass.MEDIUM
         });
         
-        // Parse the AI response to extract response text and status
-        const analysis = analyzeResponseContext(aiResponse);
+        // Parse the AI response
+        const analysis = safeParseAIResponse(aiResponse);
         const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         const status = analysis.status;
-        elizaLogger.info("chris_context", response, status)
         
         // Set global responseStatus for callback
         setGlobalResponseStatus(status);
@@ -1209,39 +1215,44 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
 Progress: ${currentAnsweredCount}/2 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
-User's last response: "${_message.content.text}"
+I need to ask next: "${nextQuestion}"
 
-Next question to ask: "${nextQuestion}"
-"${gracePersonality}"
-- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user's last response: "${_message.content.text}" is just the answer to the previous question, "status" is "Normal situation", keep the 30~50 words and if the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, "status" is "Unexpected situation", keep the words 60~100.
+=== STATUS CLASSIFICATION RULES ===
+Always decide if this is a "Normal situation" or an "Unexpected situation":
+- "Normal situation" → The user simply answers the question, shares basic info about their loved one, or responds calmly without asking for extra info.
+- "Unexpected situation" → The user:
+  • Asks a question or want to know about something (pricing, services, amenities, locations, policies, etc.)
+  • Requests clarification or more details.
+  • Expresses frustration, confusion, or complains ("too many questions", "when does this end?")
+  • Shares an emotional reaction that needs empathy (sadness, worry, humor).
+  • Changes topic or wants to know about something outside the current question.
 
-1. If the "status" is "Normal situation":
-"${gracePersonality}"
-- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+=== RESPONSE INSTRUCTIONS ===
+1. If status is "Normal situation":
+   - Stay warm and personal.
+   - Naturally use ${userName} and ${lovedOneName} in the reply.
+   - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
 
-2. If status is "Unexpected Situation":
-- Look at the last message: "${_message.content.text}". If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}". If info is missing, search online and give the most accurate answer.
-- For pricing questions, from grandvilla_information I shared, find the closest Grand villa from the user's location: "${location}" and share that info of pricing and exact name. don't create new one on user's location, only find one I shared on Pricing info of grandvilla_information.
-- If they complain about "too many questions" or "when it ends," empathize and explain that it's just to find their perfect match—maybe crack a light joke.
-- Smoothly and playfully lead into ${nextQuestion} so it feels like part of a friendly chat, not an interrogation.
-- Keep words under 60~100.
+2. If status is "Unexpected situation":
+   - Look at the last message: "${_message.content.text}".
+   - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+     If info is missing, search online and give the most accurate answer.
+   - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+   - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+   - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+   - Keep response within 60–100 words.
 
-Return a JSON object with two fields:
-1. "response": the response text
-2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
-
-Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
+Return ONLY a JSON object:
+{"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
     
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
             context: responseContext,
-            modelClass: ModelClass.SMALL
+            modelClass: ModelClass.MEDIUM
         });
         
-        // Parse the AI response to extract response text and status
-        const analysis = analyzeResponseContext(aiResponse);
+        const analysis = safeParseAIResponse(aiResponse);
         const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         const status = analysis.status;
         
@@ -1406,39 +1417,44 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
 Progress: ${currentAnsweredCount}/3 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
-User's last response: "${_message.content.text}"
+I need to ask next: "${nextQuestion}"
 
-I need to ask: "${nextQuestion}"
-"${gracePersonality}"
-- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user's last response: "${_message.content.text}" is just the answer to the previous question, "status" is "Normal situation", keep the 30~50 words and if the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, "status" is "Unexpected situation", keep the words 60~100.
+=== STATUS CLASSIFICATION RULES ===
+Always decide if this is a "Normal situation" or an "Unexpected situation":
+- "Normal situation" → The user simply answers the question, shares basic info about their loved one, or responds calmly without asking for extra info.
+- "Unexpected situation" → The user:
+  • Asks a question or want to know about something (pricing, services, amenities, locations, policies, etc.)
+  • Requests clarification or more details.
+  • Expresses frustration, confusion, or complains ("too many questions", "when does this end?")
+  • Shares an emotional reaction that needs empathy (sadness, worry, humor).
+  • Changes topic or wants to know about something outside the current question.
 
-1. If the "status" is "Normal situation":
-"${gracePersonality}"
-- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+=== RESPONSE INSTRUCTIONS ===
+1. If status is "Normal situation":
+   - Stay warm and personal.
+   - Naturally use ${userName} and ${lovedOneName} in the reply.
+   - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
 
-2. If status is "Unexpected Situation":
-- Look at the last message: "${_message.content.text}". If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}". If info is missing, search online and give the most accurate answer.
-- For pricing questions, from grandvilla_information I shared, find the closest Grand villa from the user's location: "${location}" and share that info of pricing and exact name. don't create new one on user's location, only find one I shared on Pricing info of grandvilla_information.
-- If they complain about "too many questions" or "when it ends," empathize and explain that it's just to find their perfect match—maybe crack a light joke.
-- Smoothly and playfully lead into ${nextQuestion} so it feels like part of a friendly chat, not an interrogation.
-- Keep words under 60~100.
+2. If status is "Unexpected situation":
+   - Look at the last message: "${_message.content.text}".
+   - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+     If info is missing, search online and give the most accurate answer.
+   - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+   - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+   - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+   - Keep response within 60–100 words.
 
-Return a JSON object with two fields:
-1. "response": the response text
-2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
-
-Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
+Return ONLY a JSON object:
+{"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
     
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
             context: responseContext,
-            modelClass: ModelClass.SMALL
+            modelClass: ModelClass.MEDIUM
         });
         
-        // Parse the AI response to extract response text and status
-        const analysis = analyzeResponseContext(aiResponse);
+        const analysis = safeParseAIResponse(aiResponse);
         const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         const status = analysis.status;
         
@@ -1602,39 +1618,44 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
 Progress: ${currentAnsweredCount}/2 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
-User's last response: "${_message.content.text}"
+I need to ask next: "${nextQuestion}"
 
-I need to ask: "${nextQuestion}"
-"${gracePersonality}"
-- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
-- If the user's last response: "${_message.content.text}" is just the answer to the previous question, "status" is "Normal situation", keep the 30~50 words and if the user ask or want to know about something, expresses confusion, or shares a complaint in their last message: ${_message.content.text}, "status" is "Unexpected situation", keep the words 60~100.
+=== STATUS CLASSIFICATION RULES ===
+Always decide if this is a "Normal situation" or an "Unexpected situation":
+- "Normal situation" → The user simply answers the question, shares basic info about their loved one, or responds calmly without asking for extra info.
+- "Unexpected situation" → The user:
+  • Asks a question or want to know about something (pricing, services, amenities, locations, policies, etc.)
+  • Requests clarification or more details.
+  • Expresses frustration, confusion, or complains ("too many questions", "when does this end?")
+  • Shares an emotional reaction that needs empathy (sadness, worry, humor).
+  • Changes topic or wants to know about something outside the current question.
 
-1. If the "status" is "Normal situation":
-"${gracePersonality}"
-- Uses both the user's name \"${userName}\" and their loved one's name \"${lovedOneName}\" naturally within the response, making it feel personal and caring
+=== RESPONSE INSTRUCTIONS ===
+1. If status is "Normal situation":
+   - Stay warm and personal.
+   - Naturally use ${userName} and ${lovedOneName} in the reply.
+   - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
 
-2. If status is "Unexpected Situation":
-- Look at the last message: "${_message.content.text}". If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}". If info is missing, search online and give the most accurate answer.
-- For pricing questions, from grandvilla_information I shared, find the closest Grand villa from the user's location: "${location}" and share that info of pricing and exact name. don't create new one on user's location, only find one I shared on Pricing info of grandvilla_information.
-- If they complain about "too many questions" or "when it ends," empathize and explain that it's just to find their perfect match—maybe crack a light joke.
-- Smoothly and playfully lead into ${nextQuestion} so it feels like part of a friendly chat, not an interrogation.
-- Keep words under 60~100.
+2. If status is "Unexpected situation":
+   - Look at the last message: "${_message.content.text}".
+   - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+     If info is missing, search online and give the most accurate answer.
+   - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+   - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+   - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+   - Keep response within 60–100 words.
 
-Return a JSON object with two fields:
-1. "response": the response text
-2. "status": "Unexpected situation" if the user asked a question, expressed confusion, or shared a complaint in their message, otherwise "Normal situation"
-
-Format: {"response": "your response text here", "status": "Unexpected situation" or "Normal situation"}`;
+Return ONLY a JSON object:
+{"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
     
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
             context: responseContext,
-            modelClass: ModelClass.SMALL
+            modelClass: ModelClass.MEDIUM
         });
         
-        // Parse the AI response to extract response text and status
-        const analysis = analyzeResponseContext(aiResponse);
+        const analysis = safeParseAIResponse(aiResponse);
         const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         const status = analysis.status;
         
@@ -2859,35 +2880,33 @@ async function getVisitTimingInfo(_runtime: IAgentRuntime, _message: Memory): Pr
     return null;
 }
 
-// Helper function to analyze response context and extract response text and status
-interface ResponseAnalysis {
-    responseText: string;
-    status: string;
-}
-
-function analyzeResponseContext(aiResponse: string): ResponseAnalysis {
-    let responseText: string;
-    let status: string = "Normal situation"; // default status
-    
+// Helper function to safely extract and parse JSON from AI response
+function safeParseAIResponse(response: string): { responseText: string; status: string } {
     try {
-        // Try to parse as JSON first
-        const parsedResponse = JSON.parse(aiResponse);
-        responseText = parsedResponse.response || aiResponse;
-        status = parsedResponse.status || "Normal situation";
-        
-        // Validate status values
-        if (status !== "Unexpected situation" && status !== "Normal situation") {
-            status = "Normal situation"; // fallback to default if invalid status
+        // First, try direct parse
+        const parsed = JSON.parse(response);
+        return {
+            responseText: parsed.response || '',
+            status: parsed.status || 'Normal situation'
+        };
+    } catch (error) {
+        // If direct parse fails, try to extract JSON object from text
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            try {
+                const parsed = JSON.parse(jsonMatch[0]);
+                return {
+                    responseText: parsed.response || '',
+                    status: parsed.status || 'Normal situation'
+                };
+            } catch (innerError) {
+                elizaLogger.error("Failed to parse extracted JSON:", innerError);
+            }
         }
-        
-    } catch (parseError) {
-        // If JSON parsing fails, use the raw response as fallback
-        responseText = aiResponse;
-        status = "Normal situation";
+        elizaLogger.error("Failed to parse AI response:", error);
+        return {
+            responseText: '',
+            status: 'Normal situation'
+        };
     }
-    
-    return {
-        responseText,
-        status
-    };
 }
