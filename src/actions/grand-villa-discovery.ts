@@ -1750,19 +1750,22 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
 
             All previous answers: "${allPreviousAnswers}"
             Grand Villa information for reference: "${grandVillaInfo}"
+            User location: "${location}"
 
             Your task:
             1. Review all previous answers to identify one or more key concerns, preferences, or needs that matter most for ${lovedOneName}.
-            2. Use the provided Grand Villa information to find the *most relevant, specific feature, service, or activity* that directly addresses the concern (e.g., chef-prepared meals, wellness programs, resident clubs, memory care, safety systems, transportation, etc.).
+            2. From ${grandVillaInfo}, select:
+            - The *nearest Grand Villa location* to the user's "${location}". You MUST always mention this nearest location by name in the response. Do not omit it.
+            - The *most relevant, specific feature, service, or activity* that directly addresses the concern (e.g., chef-prepared meals, wellness programs, resident clubs, memory care, safety systems, transportation, etc.).
             3. Write a single empathetic response that must:
-            - Start naturally with “Since you mentioned...” and recap the concern.
+            - Start naturally with "Since you mentioned... and recap the concern.
             - Immediately highlight the *specific Grand Villa feature or service* that best matches.
-            - Keep the tone warm, authentic, and aligned with its natural personality
-            - Stay concise and conversational (under 60-90 words).
+            - Explicitly tie the answer to the nearest Grand Villa location (e.g., "At Grand Villa of Clearwater, residents especially enjoy...").
+            - Keep the tone warm, authentic, and aligned with its natural personality.
+            - Stay concise and conversational (under 60–90 words).
 
             Return ONLY the response text, no extra commentary or formatting.
             `;
-
         try {
             const aiResponse = await generateText({
                 runtime: _runtime,
@@ -1961,7 +1964,48 @@ async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _s
         const contactInfo = await getContactInfo(_runtime, _message);
         const lovedOneName = contactInfo?.loved_one_name || "your loved one";
         
-        const initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like. Would Wednesday afternoon or Friday morning work better for you?`;
+        // Get user's latest message (handle transition and content formats)
+        let userLatestText = _message.content?.text || '';
+        if (!userLatestText) {
+            const allMemories = await _runtime.messageManager.getMemories({
+                roomId: _message.roomId,
+                count: 20
+            });
+            const lastUserMem = allMemories
+                .filter(mem => 
+                    mem.userId === _message.userId && 
+                    mem.content?.source === "direct" && 
+                    mem.content?.text
+                )
+                .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+            userLatestText = lastUserMem?.content.text || '';
+            elizaLogger.info(`Fetched last user text (source: direct): ${userLatestText}`);
+        }
+        
+        // Generate dynamic response
+        const responseContext = `
+            Respond warmly to the user's message: "${userLatestText}".
+            1. Reference ${grandVillaInfo} to naturally highlight one *specific feature, service, or activity* that matches the user's interest or concern.
+            2. Keep tone empathetic, positive, and conversational.
+            3. After mentioning the feature, invite them to visit by asking: "Would Wednesday afternoon or Friday morning work better for you?"
+            4. Keep total response under 80 words.
+            
+            Return ONLY: {"response": "your reply here"}`;
+        
+        let initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like. Would Wednesday afternoon or Friday morning work better for you?`;
+        
+        try {
+            const aiResponse = await generateText({
+                runtime: _runtime,
+                context: responseContext,
+                modelClass: ModelClass.SMALL
+            });
+            const parsed = JSON.parse(aiResponse);
+            initialResponse = parsed.response || initialResponse;
+            elizaLogger.info("chris_response", responseContext, aiResponse);
+        } catch (error) {
+            elizaLogger.error("Failed to generate dynamic initial response:", error);
+        }
         
         // Add the initial question to visit_scheduling to track that we've asked it
         const initialQuestionEntry = {
