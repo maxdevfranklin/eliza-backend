@@ -1458,6 +1458,7 @@ Return ONLY a JSON object:
         const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         const status = analysis.status;
         
+        elizaLogger.info("chris_response", responseContext, aiResponse);
         // Set global responseStatus for callback
         setGlobalResponseStatus(status);
         
@@ -1659,6 +1660,7 @@ Return ONLY a JSON object:
         const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         const status = analysis.status;
         
+        elizaLogger.info("chris_response", responseContext, aiResponse);
         // Set global responseStatus for callback
         setGlobalResponseStatus(status);
         
@@ -1743,34 +1745,29 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         ].join(" | ");
         
         // Generate a response that matches Grand Villa to the user's needs based on their previous answers
-        const responseContext = `The user ${userName ? `(${userName}) ` : ''}has shared information about their situation and ${lovedOneName}'s needs throughout our discovery process.
+        const responseContext = `
+            The user ${userName ? `(${userName}) ` : ''} has shared information about their situation and ${lovedOneName}'s needs throughout our discovery process.
 
             All previous answers: "${allPreviousAnswers}"
-            Your personality is "${gracePersonality}" — make sure your response style reflects this personality fully.
-            
+            Grand Villa information for reference: "${grandVillaInfo}"
+
             Your task:
-            1. Review all previous answers to identify more than one key concern, preference, or need that matters most for ${lovedOneName}.
-            2. Research what Grand Villa Senior Living specifically offers (services, amenities, care programs, community features).
-            3. Select the most relevant Grand Villa feature or service that directly addresses the concern and don't mention generally, point the exact service or activity that Grand Villa generates.
-            4. Write a single empathetic response that must:
-            - Begin with a warm, natural phrase like "Since you mentioned..." and recap the concern from previous answers.
-            - Immediately highlight a *specific, exact Grand Villa feature or service* (e.g., chef-prepared meals, wellness programs, memory care, social clubs, emergency response system, transportation services, etc.).
-            - Express the response in the exact tone and style of personality so it feels personal and authentic.
-            - Stay concise ( under 60 words).
-            - Follow the exact rhythm and style of these examples:
-            
-            Examples:
-            "Since you mentioned that making sure your mom eats well is important, I think you'll love learning more about our chef-prepared meals. We focus on fresh, nutritious options, and residents enjoy a social dining experience, which often improves appetite and overall well-being."
-            "Since your dad used to love gardening, I think he'd really enjoy our resident-led gardening club. It's a great way for him to do something he enjoys while meeting new people in a relaxed setting."
-            "Since your mom has had a few falls recently, I want to highlight the extra safety measures in place here—like our emergency response system and 24/7 trained staff. That way, she has independence but also support when needed."
-            
-            Return ONLY the response text, no extra commentary or formatting.`;
+            1. Review all previous answers to identify one or more key concerns, preferences, or needs that matter most for ${lovedOneName}.
+            2. Use the provided Grand Villa information to find the *most relevant, specific feature, service, or activity* that directly addresses the concern (e.g., chef-prepared meals, wellness programs, resident clubs, memory care, safety systems, transportation, etc.).
+            3. Write a single empathetic response that must:
+            - Start naturally with “Since you mentioned...” and recap the concern.
+            - Immediately highlight the *specific Grand Villa feature or service* that best matches.
+            - Keep the tone warm, authentic, and aligned with its natural personality
+            - Stay concise and conversational (under 60-90 words).
+
+            Return ONLY the response text, no extra commentary or formatting.
+            `;
 
         try {
             const aiResponse = await generateText({
                 runtime: _runtime,
                 context: responseContext,
-                modelClass: ModelClass.SMALL
+                modelClass: ModelClass.MEDIUM
             });
             
             const response = aiResponse || `${userName ? `${userName}, ` : ''}Based on everything you've shared about ${lovedOneName}, I can see how Grand Villa would be such a perfect fit. The community, care, and activities we offer align beautifully with what you've described. It sounds like this could really bring ${lovedOneName} the peace and joy you want for them.`;
