@@ -1055,7 +1055,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         - Stay warm and personal.
         - Naturally use ${userName} and ${lovedOneName} in the reply.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-        - Keep words under 20-30.
+        - Keep words under 30-40.
 
         2. If status is "Unexpected situation":
         - Look at the last message: "${_message.content.text}".
@@ -1257,7 +1257,7 @@ I need to ask next: "${nextQuestion}"
         - Stay warm and personal.
         - Naturally use ${userName} and ${lovedOneName} in the reply.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-        - Keep words under 20-30.
+        - Keep words under 30-40.
 
         2. If status is "Unexpected situation":
         - Look at the last message: "${_message.content.text}".
@@ -1468,7 +1468,7 @@ I need to ask next: "${nextQuestion}"
         - Stay warm and personal.
         - Naturally use ${userName} and ${lovedOneName} in the reply.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-        - Keep words under 20-30.
+        - Keep words under 30-40.
 
         2. If status is "Unexpected situation":
         - Look at the last message: "${_message.content.text}".
@@ -1678,7 +1678,7 @@ I need to ask next: "${nextQuestion}"
         - Stay warm and personal.
         - Naturally use ${userName} and ${lovedOneName} in the reply.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-        - Keep words under 20-30.
+        - Keep words under 30-40.
 
         2. If status is "Unexpected situation":
         - Look at the last message: "${_message.content.text}".
