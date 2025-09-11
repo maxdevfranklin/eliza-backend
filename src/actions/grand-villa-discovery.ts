@@ -1861,6 +1861,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     
     elizaLogger.info(`=== NEEDS MATCHING STAGE ===`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
