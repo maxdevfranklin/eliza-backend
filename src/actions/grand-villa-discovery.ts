@@ -1052,33 +1052,22 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
 
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
-        - Start with simple, direct acknowledgment that shows you're listening
-        - Acknowledge what they shared in plain, caring language - no dramatic imagery needed
-        - Respond with genuine understanding using natural, conversational language
-        - Ask your next question directly and warmly - no elaborate transitions required
-        - Sound like a knowledgeable neighbor having a normal conversation - warm but not performative
-        - Use clear, helpful language that feels natural and trustworthy
-        - Use simple validation like 'That's tough', 'I understand', 'That makes sense' - keep it natural
-        - Keep responses non-duplicative, concise, conversational and practical
-        - Use ${userName} and ${lovedOneName} naturally.
-        - Smoothly introduce "${nextQuestion}" so it feels conversational.
-        - Keep the words under 30-40
+        - Stay warm and personal.
+        - Naturally use ${userName} and ${lovedOneName} in the reply.
+        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
+        - Keep words under 20-30.
 
         2. If status is "Unexpected situation":
-        - Review last user message: "${_message.content.text}" and the user's location: "${location}".
-        - If it's a question or curiosity, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If missing, search online and give the most accurate answer.
-        - For pricing questions, identify the closest Grand Villa to "${location}" from the information I gave and share that exact community name and pricing.
-        - If they complain about too many questions or timing:
-            • Empathize with their frustration.
-            • Explain that the questions help match ${lovedOneName}'s needs better.
-            • Add a light, friendly or humorous remark.
-        - Always close by connecting naturally back to "${nextQuestion}".
-        - Keep total words 50-80.
+        - Look at the last message: "${_message.content.text}".
+        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+            If info is missing, search online and give the most accurate answer.
+        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+        - Keep response within 40–60 words.
 
         Return ONLY a JSON object:
-        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}
-        `;
+        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
@@ -1265,33 +1254,22 @@ I need to ask next: "${nextQuestion}"
 
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
-        - Start with simple, direct acknowledgment that shows you're listening
-        - Acknowledge what they shared in plain, caring language - no dramatic imagery needed
-        - Respond with genuine understanding using natural, conversational language
-        - Ask your next question directly and warmly - no elaborate transitions required
-        - Sound like a knowledgeable neighbor having a normal conversation - warm but not performative
-        - Use clear, helpful language that feels natural and trustworthy
-        - Use simple validation like 'That's tough', 'I understand', 'That makes sense' - keep it natural
-        - Keep responses non-duplicative, concise, conversational and practical
-        - Use ${userName} and ${lovedOneName} naturally.
-        - Smoothly introduce "${nextQuestion}" so it feels conversational.
-        - Keep the words under 30-40
+        - Stay warm and personal.
+        - Naturally use ${userName} and ${lovedOneName} in the reply.
+        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
+        - Keep words under 20-30.
 
         2. If status is "Unexpected situation":
-        - Review last user message: "${_message.content.text}" and the user's location: "${location}".
-        - If it's a question or curiosity, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If missing, search online and give the most accurate answer.
-        - For pricing questions, identify the closest Grand Villa to "${location}" from the information I gave and share that exact community name and pricing.
-        - If they complain about too many questions or timing:
-            • Empathize with their frustration.
-            • Explain that the questions help match ${lovedOneName}'s needs better.
-            • Add a light, friendly or humorous remark.
-        - Always close by connecting naturally back to "${nextQuestion}".
-        - Keep total words 50-80.
+        - Look at the last message: "${_message.content.text}".
+        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+            If info is missing, search online and give the most accurate answer.
+        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+        - Keep response within 40–60 words.
 
         Return ONLY a JSON object:
-        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}
-        `;
+        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
     
     try {
         const aiResponse = await generateText({
@@ -1487,33 +1465,22 @@ I need to ask next: "${nextQuestion}"
 
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
-        - Start with simple, direct acknowledgment that shows you're listening
-        - Acknowledge what they shared in plain, caring language - no dramatic imagery needed
-        - Respond with genuine understanding using natural, conversational language
-        - Ask your next question directly and warmly - no elaborate transitions required
-        - Sound like a knowledgeable neighbor having a normal conversation - warm but not performative
-        - Use clear, helpful language that feels natural and trustworthy
-        - Use simple validation like 'That's tough', 'I understand', 'That makes sense' - keep it natural
-        - Keep responses non-duplicative, concise, conversational and practical
-        - Use ${userName} and ${lovedOneName} naturally.
-        - Smoothly introduce "${nextQuestion}" so it feels conversational.
-        - Keep the words under 30-40 words
+        - Stay warm and personal.
+        - Naturally use ${userName} and ${lovedOneName} in the reply.
+        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
+        - Keep words under 20-30.
 
         2. If status is "Unexpected situation":
-        - Review last user message: "${_message.content.text}" and the user's location: "${location}".
-        - If it's a question or curiosity, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If missing, search online and give the most accurate answer.
-        - For pricing questions, identify the closest Grand Villa to "${location}" from the information I gave and share that exact community name and pricing.
-        - If they complain about too many questions or timing:
-            • Empathize with their frustration.
-            • Explain that the questions help match ${lovedOneName}'s needs better.
-            • Add a light, friendly or humorous remark.
-        - Always close by connecting naturally back to "${nextQuestion}".
-        - Keep total words 50-80.
+        - Look at the last message: "${_message.content.text}".
+        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+            If info is missing, search online and give the most accurate answer.
+        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+        - Keep response within 40–60 words.
 
         Return ONLY a JSON object:
-        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}
-        `;
+        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
     
     try {
         const aiResponse = await generateText({
@@ -1708,33 +1675,22 @@ I need to ask next: "${nextQuestion}"
 
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
-        - Start with simple, direct acknowledgment that shows you're listening
-        - Acknowledge what they shared in plain, caring language - no dramatic imagery needed
-        - Respond with genuine understanding using natural, conversational language
-        - Ask your next question directly and warmly - no elaborate transitions required
-        - Sound like a knowledgeable neighbor having a normal conversation - warm but not performative
-        - Use clear, helpful language that feels natural and trustworthy
-        - Use simple validation like 'That's tough', 'I understand', 'That makes sense' - keep it natural
-        - Keep responses non-duplicative, concise, conversational and practical
-        - Use ${userName} and ${lovedOneName} naturally.
-        - Smoothly introduce "${nextQuestion}" so it feels conversational.
-        - Keep total words 30-40.
+        - Stay warm and personal.
+        - Naturally use ${userName} and ${lovedOneName} in the reply.
+        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
+        - Keep words under 20-30.
 
         2. If status is "Unexpected situation":
-        - Review last user message: "${_message.content.text}" and the user's location: "${location}".
-        - If it's a question or curiosity, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If missing, search online and give the most accurate answer.
-        - For pricing questions, identify the closest Grand Villa to "${location}" from the information I gave and share that exact community name and pricing.
-        - If they complain about too many questions or timing:
-            • Empathize with their frustration.
-            • Explain that the questions help match ${lovedOneName}'s needs better.
-            • Add a light, friendly or humorous remark.
-        - Always close by connecting naturally back to "${nextQuestion}".
-        - Keep total words 50-80.
+        - Look at the last message: "${_message.content.text}".
+        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+            If info is missing, search online and give the most accurate answer.
+        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+        - Keep response within 40–60 words.
 
         Return ONLY a JSON object:
-        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}
-        `;
+        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
     
     try {
         const aiResponse = await generateText({
