@@ -1,57 +1,7 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
 import { discoveryStateProvider, saveUserResponse, getUserResponses, updateUserStatus } from "../providers/discovery-state.js";
 
-// === Scheduler client ===
-const SCHEDULER_URL = process.env.SCHEDULER_URL || "http://127.0.0.1:4005/schedule";
 
-type SchedulerOK = {
-  ok: true;
-  eventId: string;
-  htmlLink: string;
-  whenText: string;
-  startIso: string;
-};
-type SchedulerErr = { ok: false; error: any };
-
-async function scheduleWithGateway(payload: {
-  email: string;
-  label?: string;
-  startIso?: string;
-  durationMin?: number;
-  tz?: string;
-  createMeet?: boolean;
-  roomId?: string;
-  agentId?: string;
-  externalKey?: string;
-  summary?: string;
-  location?: string;
-  description?: string;
-}): Promise<SchedulerOK> {
-  const res = await fetch(SCHEDULER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const data = (await res.json()) as SchedulerOK | SchedulerErr;
-  if (!res.ok || (data as SchedulerErr).ok === false) {
-    throw new Error(`Scheduler error: ${JSON.stringify((data as SchedulerErr).error ?? data)}`);
-  }
-  return data as SchedulerOK;
-}
-
-// Map your suggestions to a concrete time the scheduler parses consistently
-function labelFromSuggestedSlot(selected: string): string {
-  if (/weds?|wednesday/i.test(selected) && /afternoon/i.test(selected)) return "Wednesday 3pm";
-  if (/fri|friday/i.test(selected) && /morning/i.test(selected)) return "Friday 10am";
-  return selected;
-}
-
-// Quick email extractor for “my email is awh20s@fsu.edu”
-function extractEmail(text?: string): string | null {
-  if (!text) return null;
-  const m = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
-  return m?.[0] ?? null;
-}
 
 // Simple global variable to track current responseStatus
 let currentResponseStatus = "Normal situation";
@@ -214,7 +164,7 @@ interface QAEntry {
 interface ComprehensiveRecord {
     contact_info: {
         name?: string;
-        phone?: string;
+        location?: string;
         loved_one_name?: string;
         collected_at: string;
     };
@@ -252,7 +202,60 @@ interface ComprehensiveQA {
     qaEntries: QAEntry[];
     contactCollectedAt?: string;
 }
+// Read either SCHEDULE_URL or SCHEDULER_URL and normalize
+const rawScheduler =
+  process.env.SCHEDULE_URL ||
+  process.env.SCHEDULER_URL ||
+  'http://127.0.0.1:4005';
 
+const SCHEDULE_BASE = rawScheduler.replace(/\/+$/, ''); // strip trailing slashes
+const SCHEDULE_URL = `${SCHEDULE_BASE}/schedule`;
+const DEFAULT_TZ = process.env.TZ || 'America/New_York';
+
+type BookingResult = {
+  ok: boolean;
+  eventId?: string;
+  htmlLink?: string;
+  whenText?: string;
+  startIso?: string;
+  error?: string;
+};
+
+async function scheduleWithCalendar(args: {
+  email: string;
+  label?: string;        // e.g., "Wednesday afternoon" or "Fri 10am"
+  startIso?: string;
+  tz?: string;
+  roomId: string;
+  agentId: string;
+  summary?: string;
+  location?: string;
+}): Promise<BookingResult> {
+  const res = await fetch(SCHEDULE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: args.email,
+      label: args.label,
+      startIso: args.startIso,
+      tz: args.tz || DEFAULT_TZ,
+      roomId: args.roomId,
+      agentId: args.agentId,
+      durationMin: 60,
+      createMeet: true,
+      summary: args.summary ?? 'Grand Villa Tour',
+      location: args.location ?? 'Grand Villa of Clearwater',
+      // idempotency
+      externalKey: `${args.roomId}|${args.agentId}|${args.label ?? args.startIso ?? ''}`,
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.ok === false) {
+    return { ok: false, error: data?.error || `HTTP ${res.status}` };
+  }
+  return { ok: true, ...data };
+}
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
     description: "Universal handler that responds to every user message, regardless of content, intent, or topic. Always triggers to ensure no user input goes unhandled.",
@@ -556,8 +559,8 @@ async function getComprehensiveRecord(_runtime: IAgentRuntime, _message: Memory)
                         if (record.contact_info.name !== null && record.contact_info.name !== undefined) {
                             contactUpdate.name = record.contact_info.name;
                         }
-                        if (record.contact_info.phone !== null && record.contact_info.phone !== undefined) {
-                            contactUpdate.phone = record.contact_info.phone;
+                        if (record.contact_info.location !== null && record.contact_info.location !== undefined) {
+                            contactUpdate.location = record.contact_info.location;
                         }
                         if (record.contact_info.loved_one_name !== null && record.contact_info.loved_one_name !== undefined) {
                             contactUpdate.loved_one_name = record.contact_info.loved_one_name;
@@ -750,8 +753,8 @@ async function displayQASummary(_runtime: IAgentRuntime, _message: Memory): Prom
     if (contactInfo?.name) {
         elizaLogger.info(`👤 Name: ${contactInfo.name}`);
     }
-    if (contactInfo?.phone) {
-        elizaLogger.info(`📞 Phone: ${contactInfo.phone}`);
+    if (contactInfo?.location) {
+        elizaLogger.info(`📞 Location: ${contactInfo.location}`);
     }
     elizaLogger.info(`📝 Total Q&A Entries: ${qaEntries.length}`);
     elizaLogger.info(`==================================`);
@@ -801,61 +804,61 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
         // Check if we already have any contact info stored
         let existingContactInfo = await getContactInfo(_runtime, _message);
         
-        // Try to extract name, phone number, and loved one's name from ALL trust building responses
+        // Try to extract name, location, and loved one's name from ALL trust building responses
         const extractionContext = `Please extract the user's information from these responses: "${allTrustBuildingText}"
-
+            
             Look for:
             - User's full name (first and last name)
-            - Phone number (any format: xxx-xxx-xxxx, (xxx) xxx-xxxx, xxx.xxx.xxxx, xxxxxxxxxx)
+            - Location (city, state, or zip code)
             - Name of their loved one/family member (the person they're seeking senior living for - could be "my mom", "my father", "John", "Mary", etc.)
             
-            ${existingContactInfo ? `Note: We may already have some info - Name: ${existingContactInfo.name || 'none'}, Phone: ${existingContactInfo.phone || 'none'}, Loved One: ${existingContactInfo.loved_one_name || 'none'}` : ''}
+            ${existingContactInfo ? `Note: We may already have some info - Name: ${existingContactInfo.name || 'none'}, Location: ${existingContactInfo.location || 'none'}, Loved One: ${existingContactInfo.loved_one_name || 'none'}` : ''}
             
             Return your response in this exact JSON format:
             {
                 "name": "extracted user's full name or null if not found",
-                "phone": "extracted phone number in clean format (xxx-xxx-xxxx) or null if not found",
+                "location": "extracted location such as city, state, or zip code or null if not found",
                 "loved_one_name": "extracted loved one's name or null if not found",
                 "foundName": true/false,
-                "foundPhone": true/false,
+                "foundLocation": true/false,
                 "foundLovedOneName": true/false
             }
             
             Make sure to return ONLY valid JSON, no additional text.`;
-
+        
         try {
             const aiResponse = await generateText({
                 runtime: _runtime,
                 context: extractionContext,
                 modelClass: ModelClass.SMALL
             });
-
+            
             const parsed = JSON.parse(aiResponse);
             
             // Merge with existing info if we have any
             let finalName = parsed.foundName && parsed.name ? parsed.name : (existingContactInfo?.name || null);
-            let finalPhone = parsed.foundPhone && parsed.phone ? parsed.phone : (existingContactInfo?.phone || null);
+            let finalLocation = parsed.foundLocation && parsed.location ? parsed.location : (existingContactInfo?.location || null);
             let finalLovedOneName = parsed.foundLovedOneName && parsed.loved_one_name ? parsed.loved_one_name : (existingContactInfo?.loved_one_name || null);
             
             elizaLogger.info(`=== CONTACT INFO EXTRACTION ===`);
             elizaLogger.info(`Extracted name: ${parsed.foundName ? parsed.name : 'NO'}`);
-            elizaLogger.info(`Extracted phone: ${parsed.foundPhone ? parsed.phone : 'NO'}`);
+            elizaLogger.info(`Extracted location: ${parsed.foundLocation ? parsed.location : 'NO'}`);
             elizaLogger.info(`Extracted loved one: ${parsed.foundLovedOneName ? parsed.loved_one_name : 'NO'}`);
             elizaLogger.info(`Final name: ${finalName || 'NO'}`);
-            elizaLogger.info(`Final phone: ${finalPhone || 'NO'}`);
+            elizaLogger.info(`Final location: ${finalLocation || 'NO'}`);
             elizaLogger.info(`Final loved one: ${finalLovedOneName || 'NO'}`);
             elizaLogger.info(`===============================`);
-
+            
             // If we found all three pieces of info, save them and proceed
-            if (finalName && finalPhone && finalLovedOneName) {
+            if (finalName && finalLocation && finalLovedOneName) {
                 elizaLogger.info(`=== SAVING CONTACT INFO TO COMPREHENSIVE RECORD ===`);
-                elizaLogger.info(`Name: ${finalName}, Phone: ${finalPhone}, Loved One: ${finalLovedOneName}`);
+                elizaLogger.info(`Name: ${finalName}, Location: ${finalLocation}, Loved One: ${finalLovedOneName}`);
                 
                 // Save contact information to comprehensive record
                 await updateComprehensiveRecord(_runtime, _message, {
                     contact_info: {
                         name: finalName,
-                        phone: finalPhone,
+                        location: finalLocation,
                         loved_one_name: finalLovedOneName,
                         collected_at: new Date().toISOString()
                     }
@@ -883,14 +886,14 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
             }
             
             // Save partial contact info if we have new information
-            if (finalName || finalPhone || finalLovedOneName) {
+            if (finalName || finalLocation || finalLovedOneName) {
                 elizaLogger.info(`=== SAVING PARTIAL CONTACT INFO TO COMPREHENSIVE RECORD ===`);
-                elizaLogger.info(`Name: ${finalName || 'not provided'}, Phone: ${finalPhone || 'not provided'}, Loved One: ${finalLovedOneName || 'not provided'}`);
+                elizaLogger.info(`Name: ${finalName || 'not provided'}, Location: ${finalLocation || 'not provided'}, Loved One: ${finalLovedOneName || 'not provided'}`);
                 
                 await updateComprehensiveRecord(_runtime, _message, {
                     contact_info: {
                         name: finalName,
-                        phone: finalPhone,
+                        location: finalLocation,
                         loved_one_name: finalLovedOneName,
                         collected_at: new Date().toISOString()
                     }
@@ -903,11 +906,11 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
             let missingInfoResponse = "";
             const missingItems = [];
             if (!finalName) missingItems.push("your name");
-            if (!finalPhone) missingItems.push("your phone number");
+            if (!finalLocation) missingItems.push("your location");
             if (!finalLovedOneName) missingItems.push("your loved one's name");
             
             if (missingItems.length === 3) {
-                missingInfoResponse = "I'd love to help you! To get started, could I get your name, phone number, and the name of your loved one you're looking for senior living options for?";
+                missingInfoResponse = "I'd love to help you! To get started, could I get your name, location, and the name of your loved one you're looking for senior living options for?";
             } else if (missingItems.length === 2) {
                 missingInfoResponse = `Thanks for sharing! Could I also get ${missingItems.join(" and ")}?`;
             } else if (missingItems.length === 1) {
@@ -932,7 +935,7 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
         } catch (error) {
             elizaLogger.error("Error extracting contact info:", error);
             // Fallback to asking for all contact info
-            const fallbackResponse = "I'd love to help you! To get started, could I get your name, phone number, and the name of your loved one you're looking for senior living options for?";
+            const fallbackResponse = "I'd love to help you! To get started, could I get your name, location, and the name of your loved one you're looking for senior living options for?";
             
             await _runtime.messageManager.createMemory({
                 roomId: _message.roomId,
@@ -950,8 +953,8 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
         }
     }
     
-    // First interaction - ask for name, phone, and loved one's name
-    const initialResponse = "Hello! I'm Grace, and I'm here to help you explore senior living options for your family. To get started, could I get your name, phone number, and the name of your loved one you're looking for senior living options for?";
+    // First interaction - ask for name, location, and loved one's name
+    const initialResponse = "Hello! I'm Grace, and I'm here to help you explore senior living options for your family. To get started, could I get your name, location, and the name of your loved one you're looking for senior living options for?";
     
     await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
@@ -982,6 +985,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     
     // Create personalized questions using loved one's name
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     const situationQuestions = [
         "Move to next step",
         "What made you decide to reach out about senior living today?",
@@ -1179,6 +1183,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     
     // Get comprehensive record to see what questions have been asked/answered
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -1261,8 +1266,8 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     const previousAnswers = lifestyleQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's lifestyle and daily activities. 
-
-Progress: ${currentAnsweredCount}/3 questions answered so far.
+    
+Progress: ${currentAnsweredCount}/2 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
 I need to ask next: "${nextQuestion}"
@@ -1369,6 +1374,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     
     // Get comprehensive record to see what questions have been asked/answered
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -1462,7 +1468,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     const previousAnswers = readinessQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's readiness and family involvement.
-
+    
 Progress: ${currentAnsweredCount}/3 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
@@ -1570,6 +1576,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     
     // Get comprehensive record to see what questions have been asked/answered
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -1663,7 +1670,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     const previousAnswers = prioritiesQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their priorities and what's important in choosing a senior living community.
-
+    
 Progress: ${currentAnsweredCount}/2 questions answered so far.
 ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
 
@@ -1994,445 +2001,533 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
     return response;
 }
 
+
 // Schedule Visit Handler
-// Schedule Visit Handler (DROP-IN)
+// Schedule Visit Handler (rewritten with booking + email flow)
 async function handleScheduleVisit(
     _runtime: IAgentRuntime,
     _message: Memory,
     _state: State,
-    _discoveryState: any,
+    discoveryState: any,
     gracePersonality: string,
     grandVillaInfo: string
   ): Promise<string> {
     elizaLogger.info("Handling schedule visit stage");
-    
-    // Check if this is the first interaction in schedule_visit stage
-    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
-    const hasAskedInitialQuestion = comprehensiveRecord?.visit_scheduling && 
-        comprehensiveRecord.visit_scheduling.some(entry => 
-            entry.question === "Would Wednesday afternoon or Friday morning work better for you?"
-        );
-    
-    // If this is the first interaction, return the initial response
-    if (!hasAskedInitialQuestion) {
-        const userName = await getUserFirstName(_runtime, _message);
-        const contactInfo = await getContactInfo(_runtime, _message);
-        const lovedOneName = contactInfo?.loved_one_name || "your loved one";
-        
-        // Get user's latest message (handle transition and content formats)
-        let userLatestText = _message.content?.text || '';
-        if (!userLatestText) {
-            const allMemories = await _runtime.messageManager.getMemories({
-                roomId: _message.roomId,
-                count: 20
-            });
-            const lastUserMem = allMemories
-                .filter(mem => 
-                    mem.userId === _message.userId && 
-                    mem.content?.source === "direct" && 
-                    mem.content?.text
-                )
-                .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-            userLatestText = lastUserMem?.content.text || '';
-            elizaLogger.info(`Fetched last user text (source: direct): ${userLatestText}`);
-        }
-        
-        // Generate dynamic response
-        const responseContext = `
-            Respond warmly to the user's message: "${userLatestText}".
-            1. Reference ${grandVillaInfo} to naturally highlight one *specific feature, service, or activity* that matches the user's interest or concern.
-            2. Keep tone empathetic, positive, and conversational.
-            3. After mentioning the feature, invite them to visit by asking: "Would Wednesday afternoon or Friday morning work better for you?"
-            4. Keep total response under 80 words.
-            
-            Return ONLY: {"response": "your reply here"}`;
-        
-        let initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like. Would Wednesday afternoon or Friday morning work better for you?`;
-        
-        try {
-            const aiResponse = await generateText({
-                runtime: _runtime,
-                context: responseContext,
-                modelClass: ModelClass.SMALL
-            });
-            const parsed = JSON.parse(aiResponse);
-            initialResponse = parsed.response || initialResponse;
-            elizaLogger.info("chris_response", responseContext, aiResponse);
-        } catch (error) {
-            elizaLogger.error("Failed to generate dynamic initial response:", error);
-        }
-        
-        // Add the initial question to visit_scheduling to track that we've asked it
-        const initialQuestionEntry = {
-            question: "Would Wednesday afternoon or Friday morning work better for you?",
-            answer: "Asked",
-            timestamp: new Date().toISOString()
-        };
-        
-        await updateComprehensiveRecord(_runtime, _message, {
-            visit_scheduling: [initialQuestionEntry]
-        });
-        
-        await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: { 
-                text: initialResponse,
-                metadata: {
-                    stage: "schedule_visit"
-                }
-            }
-        });
-        
-        elizaLogger.info(`Stored initial visit scheduling request in schedule_visit stage`);
-        return initialResponse;
-    }
   
-    const label = selectedTime ? labelFromSuggestedSlot(selectedTime) : (userText || "");
-    const visitInfo = await getVisitInfo(_runtime, _message);
-    const contactInfo = await getContactInfo(_runtime, _message);
-    const toEmail = extractEmail(userText) || visitInfo?.email || null;
-  
-    // If user already gave a time (label-ish) AND we have an email -> schedule now
-    const looksLikeTime =
-      /\b(mon|tue|wed|thu|fri|sat|sun|today|tomorrow|afternoon|morning)\b/i.test(userText) ||
-      /\b(\d{1,2})(:?[\.:]?\d{0,2})?\s?(am|pm)\b/i.test(userText);
-  
-    if (isUser && toEmail && (selectedTime || looksLikeTime)) {
-      try {
-        elizaLogger.info(`➡️ Scheduling via gateway: label="${label}", email="${toEmail}"`);
-        const sched = await scheduleWithGateway({
-          email: toEmail,
-          label: label || "Friday 10am",
-          durationMin: 60,
-          tz: process.env.TZ || "America/New_York",
-          roomId: _message.roomId,
-          agentId: _message.agentId,
-          externalKey: `${_message.roomId}|${toEmail}|${label}`.toLowerCase(), // idempotent
-          summary: "Grand Villa Tour",
-          location: "Grand Villa",
-          description: "On-site community tour and Q&A."
-        });
-  
-        await updateComprehensiveRecord(_runtime, _message, {
-          visit_scheduling: [
-            {
-              question: "What time would work best for your visit?",
-              answer: selectedTime || label,
-              timestamp: new Date().toISOString()
-            },
-            {
-              question: "Calendar event id",
-              answer: sched.eventId,
-              timestamp: new Date().toISOString()
-            }
-          ]
-        });
-  
-        const userName = await getUserFirstName(_runtime, _message);
-        const lovedOneName = contactInfo?.loved_one_name || "your loved one";
-  
-        const confirmation =
-          `Perfect${userName ? `, ${userName}` : ""}! I’ve scheduled your visit for ${sched.whenText}. ` +
-          `A calendar invite has been sent to ${toEmail}. ` +
-          `We’re excited to show you and ${lovedOneName} around. ` +
-          `If you need to make changes, use this link: ${sched.htmlLink}`;
-  
-        await _runtime.messageManager.createMemory({
-          roomId: _message.roomId,
-          userId: _message.userId,
-          agentId: _message.agentId,
-          content: {
-            text: confirmation,
-            metadata: {
-              stage: "schedule_visit",
-              visit_scheduled: true,
-              selected_time: selectedTime || label,
-              when_text: sched.whenText,
-              calendar_event_id: sched.eventId,
-              calendar_link: sched.htmlLink
-            }
-          }
-        });
-  
-        return confirmation;
-      } catch (e: any) {
-        elizaLogger.error("❌ Scheduling via gateway failed", e);
-        const failure =
-          "I couldn’t finalize that slot just now. Could we try a different time (e.g., “Friday 10am”)? Or share another time that works.";
-        await _runtime.messageManager.createMemory({
-          roomId: _message.roomId,
-          userId: _message.userId,
-          agentId: _message.agentId,
-          content: { text: failure, metadata: { stage: "schedule_visit" } }
-        });
-        return failure;
-      }
-    }
-  
-    // If we got here, we DON'T yet have enough to book. Ask minimally.
+    // 1) First-touch in this stage? Ask the two suggested times.
     const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
     const hasAskedInitialQuestion =
       comprehensiveRecord?.visit_scheduling &&
       comprehensiveRecord.visit_scheduling.some(
-        (entry) =>
-          entry.question === "Would Wednesday afternoon or Friday morning work better for you?"
+        (e) =>
+          e.question === "Would Wednesday afternoon or Friday morning work better for you?"
       );
   
-    if (!toEmail) {
-      const askEmail = "Great! To send your confirmation and calendar invite, what email should I use?";
-      await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: { text: askEmail, metadata: { stage: "schedule_visit" } }
-      });
-      return askEmail;
-    }
-  
     if (!hasAskedInitialQuestion) {
+      const userName = await getUserFirstName(_runtime, _message);
+      const contactInfo = await getContactInfo(_runtime, _message);
       const lovedOneName = contactInfo?.loved_one_name || "your loved one";
-      const initialResponse =
-        `It sounds like ${lovedOneName} could really thrive here. ` +
-        `Would Wednesday afternoon or Friday morning work better for you?`;
+  
+      // Try to tailor the opener
+      let userLatestText = _message.content?.text || "";
+      if (!userLatestText) {
+        const allMemories = await _runtime.messageManager.getMemories({
+          roomId: _message.roomId,
+          count: 20,
+        });
+        const lastUserMem = allMemories
+          .filter(
+            (mem) =>
+              mem.userId === _message.userId &&
+              mem.content?.source === "direct" &&
+              mem.content?.text
+          )
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt || 0).getTime() -
+              new Date(a.createdAt || 0).getTime()
+          )[0];
+        userLatestText = lastUserMem?.content.text || "";
+        elizaLogger.info(`Fetched last user text (source: direct): ${userLatestText}`);
+      }
+  
+      const responseContext = `
+  Respond warmly to the user's message: "${userLatestText}".
+  1) Reference a specific feature from: ${grandVillaInfo}
+  2) Keep tone empathetic and conversational.
+  3) End with: "Would Wednesday afternoon or Friday morning work better for you?"
+  4) ≤ 80 words.
+  Return ONLY: {"response":"..."}
+  `;
+      let initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like. Would Wednesday afternoon or Friday morning work better for you?`;
+  
+      try {
+        const aiResponse = await generateText({
+          runtime: _runtime,
+          context: responseContext,
+          modelClass: ModelClass.SMALL,
+        });
+        const parsed = JSON.parse(aiResponse);
+        initialResponse = parsed.response || initialResponse;
+      } catch (e) {
+        elizaLogger.error("Failed to generate dynamic initial response:", e);
+      }
+  
+      // Mark that we asked the initial scheduling question
       await updateComprehensiveRecord(_runtime, _message, {
         visit_scheduling: [
           {
-            question: "Would Wednesday afternoon or Friday morning work better for you?",
+            question:
+              "Would Wednesday afternoon or Friday morning work better for you?",
             answer: "Asked",
-            timestamp: new Date().toISOString()
-          }
-        ]
+            timestamp: new Date().toISOString(),
+          },
+        ],
       });
+  
       await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
         agentId: _message.agentId,
-        content: { text: initialResponse, metadata: { stage: "schedule_visit" } }
+        content: { text: initialResponse, metadata: { stage: "schedule_visit" } },
       });
+  
       return initialResponse;
     }
   
-    // We have email but no usable time yet
-    const nudge = "Thanks! What day/time works best for your visit? (e.g., “Friday 10am”).";
+    // 2) Follow-up turns
+    if (_message.content.text && _message.userId !== _message.agentId) {
+      const rawText = _message.content.text;
+      const normalized = rawText.replace(/\s+/g, " ").toLowerCase();
+  
+      // 2a) Try to detect a time selection from this message
+      let selectedTime: string | null = null;
+      if (
+        (normalized.includes("wednesday") || normalized.includes("wed")) &&
+        (normalized.includes("afternoon") ||
+          normalized.includes("pm") ||
+          normalized.includes("2pm") ||
+          normalized.includes("3pm") ||
+          normalized.includes("4pm"))
+      ) {
+        selectedTime = "Wednesday afternoon";
+      } else if (
+        (normalized.includes("friday") || normalized.includes("fri")) &&
+        (normalized.includes("morning") ||
+          normalized.includes("am") ||
+          normalized.includes("9am") ||
+          normalized.includes("10am") ||
+          normalized.includes("11am"))
+      ) {
+        selectedTime = "Friday morning";
+      }
+  
+      // 2b) Also try to pick up an email in this very message (quick regex)
+      const emailMatch = rawText.match(
+        /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i
+      );
+      if (emailMatch?.[0]) {
+        const partialVisitInfo = {
+          email: emailMatch[0],
+          collectedAt: new Date().toISOString(),
+        };
+        await saveUserResponse(
+          _runtime,
+          _message,
+          "visit_info",
+          JSON.stringify(partialVisitInfo)
+        );
+        elizaLogger.info(`Captured email inline: ${emailMatch[0]}`);
+      }
+  
+      // 2c) If no time in this message, see if we stored one previously
+      const latestRecord = await getComprehensiveRecord(_runtime, _message);
+      const visitEntries = latestRecord?.visit_scheduling || [];
+      let storedSelected: string | undefined;
+      for (let i = visitEntries.length - 1; i >= 0; i--) {
+        const q = visitEntries[i].question;
+        if (q === "Selected time" || q === "What time would work best for your visit?") {
+          storedSelected = visitEntries[i].answer;
+          if (storedSelected) break;
+        }
+      }
+      const effectiveSelected = selectedTime || storedSelected || null;
+  
+      // 2d) See if we already have an email saved (or from the regex above)
+      const visitInfo = await getVisitInfo(_runtime, _message);
+      const userEmail = visitInfo?.email || emailMatch?.[0] || null;
+  
+      elizaLogger.info(`=== VISIT TIMING CHECK ===`);
+      elizaLogger.info(`User text: ${rawText}`);
+      elizaLogger.info(`Selected this turn: ${selectedTime || "NO"}`);
+      elizaLogger.info(`Stored selected: ${storedSelected || "NO"}`);
+      elizaLogger.info(`Effective selected: ${effectiveSelected || "NO"}`);
+      elizaLogger.info(`Email on file: ${userEmail || "NO"}`);
+      elizaLogger.info(`=========================`);
+  
+      // 2e) If we still don't have a time, ask for a time (keep it warm)
+      if (!effectiveSelected) {
+        const userName = await getUserFirstName(_runtime, _message);
+        const flexibleContext = `The user ${
+          userName ? `(${userName}) ` : ""
+        }didn't pick the suggested times. Their message: "${rawText}"
+  Generate a warm, understanding reply that:
+  1) acknowledges their message,
+  2) asks what time works best for them,
+  3) shows flexibility,
+  <= 50 words.
+  Return ONLY text.`;
+  
+        let askTime =
+          `${userName ? `${userName}, ` : ""}I can work around your schedule—` +
+          `what time works best for you to visit?`;
+  
+        try {
+          const ai = await generateText({
+            runtime: _runtime,
+            context: flexibleContext,
+            modelClass: ModelClass.SMALL,
+          });
+          askTime = ai || askTime;
+        } catch (e) {
+          elizaLogger.error("Failed to generate flexible time ask:", e);
+        }
+  
+        await _runtime.messageManager.createMemory({
+          roomId: _message.roomId,
+          userId: _message.userId,
+          agentId: _message.agentId,
+          content: { text: askTime, metadata: { stage: "schedule_visit" } },
+        });
+        return askTime;
+      }
+  
+      // 2f) If we have a time but no email yet → store time and ask for email
+      if (!userEmail) {
+        await updateComprehensiveRecord(_runtime, _message, {
+          visit_scheduling: [
+            {
+              question: "Selected time",
+              answer: effectiveSelected,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        });
+  
+        const askEmail = `Great — ${effectiveSelected} works. What email should I send the calendar invite to?`;
+        await _runtime.messageManager.createMemory({
+          roomId: _message.roomId,
+          userId: _message.userId,
+          agentId: _message.agentId,
+          content: { text: askEmail, metadata: { stage: "schedule_visit" } },
+        });
+        return askEmail;
+      }
+  
+      // 2g) We have both → try to book via scheduler
+      const booked = await scheduleWithCalendar({
+        email: userEmail,
+        label: effectiveSelected, // natural-language label parsed by scheduler
+        roomId: _message.roomId,
+        agentId: _message.agentId,
+        summary: "Grand Villa Tour",
+        location: "Grand Villa of Clearwater",
+      });
+  
+      if (!booked.ok) {
+        if (booked.error === "time_conflict") {
+          const tryAgain =
+            "Looks like that time just filled. Want to try Wednesday 3pm or Friday 10am?";
+          await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: { text: tryAgain, metadata: { stage: "schedule_visit" } },
+          });
+          return tryAgain;
+        }
+        if (booked.error === "duplicate") {
+          const dup =
+            "It looks like we already booked that slot. Do you want to keep it or pick another time?";
+          await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+              text: dup,
+              metadata: { stage: "schedule_visit", visit_scheduled: true },
+            },
+          });
+          return dup;
+        }
+        const generic = `I hit a snag booking that (${booked.error}). Would another time work?`;
+        await _runtime.messageManager.createMemory({
+          roomId: _message.roomId,
+          userId: _message.userId,
+          agentId: _message.agentId,
+          content: { text: generic, metadata: { stage: "schedule_visit" } },
+        });
+        return generic;
+      }
+  
+      // 2h) Success 🎉
+      const confirmation = `All set! I booked ${booked.whenText} and sent a calendar invite to ${userEmail}.`;
+      await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+          text: confirmation,
+          metadata: {
+            stage: "schedule_visit",
+            visit_scheduled: true,
+            eventId: booked.eventId,
+            startIso: booked.startIso,
+            htmlLink: booked.htmlLink,
+          },
+        },
+      });
+      return confirmation;
+    }
+  
+    // 3) Safety fallback (no user text present)
+    const userName = await getUserFirstName(_runtime, _message);
+    const contactInfo = await getContactInfo(_runtime, _message);
+    const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+  
+    const initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? Would Wednesday afternoon or Friday morning work better for you?`;
+  
     await _runtime.messageManager.createMemory({
       roomId: _message.roomId,
       userId: _message.userId,
       agentId: _message.agentId,
-      content: { text: nudge, metadata: { stage: "schedule_visit" } }
+      content: { text: initialResponse, metadata: { stage: "schedule_visit" } },
     });
-    return nudge;
-  }
-    
-async function handleAdditionalInfo(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string): Promise<string> {
-    elizaLogger.info("Handling schedule visit stage");
-    
-    // Check if user provided a response (not the first interaction)
-    if (_message.content.text && _message.userId !== _message.agentId) {
-        // Get all user responses from schedule_visit stage so far
-        let scheduleVisitResponses = await getUserAnswersFromStage(_runtime, _message, "schedule_visit");
-        
-        // Fallback: if stage-based approach returns empty, get recent messages from ONLY current user
-        if (scheduleVisitResponses.length === 0) {
-            elizaLogger.info("Stage-based approach returned empty, using fallback to get current user's messages");
-            const allMemories = await _runtime.messageManager.getMemories({
-                roomId: _message.roomId,
-                count: 20
-            });
-            
-            scheduleVisitResponses = allMemories
-                .filter(mem => mem.userId === _message.userId && mem.userId !== _message.agentId && mem.content.text.trim())
-                .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
-                .slice(-5) // Get last 5 user messages
-                .map(mem => mem.content.text);
-            
-            elizaLogger.info(`🔒 USER ISOLATION: Fallback collected ${scheduleVisitResponses.length} messages from user ${_message.userId} only`);
-        }
-        
-        const allScheduleVisitText = scheduleVisitResponses.join(" ");
-        
-        elizaLogger.info(`=== SCHEDULE VISIT RESPONSES ===`);
-        elizaLogger.info(`All schedule visit responses: ${JSON.stringify(scheduleVisitResponses)}`);
-        elizaLogger.info(`Combined text: ${allScheduleVisitText}`);
-        elizaLogger.info(`===============================`);
-        
-        // Check if we already have any visit info stored
-        let existingVisitInfo = await getVisitInfo(_runtime, _message);
-        
-        // Try to extract email, mailing address, and preferred contact method from ALL responses
-        const extractionContext = `Please extract the user's email, mailing address, and preferred contact method from these responses: "${allScheduleVisitText}"
-
-            Look for:
-            - Email address (any format: user@domain.com, user@domain.org, etc.)
-            - Mailing address (street address, city, state, zip code - can be partial)
-            - Preferred contact method (phone, email, or any indication of preference)
-            
-            ${existingVisitInfo ? `Note: We may already have some info - Email: ${existingVisitInfo.email || 'none'}, Address: ${existingVisitInfo.mailingAddress || 'none'}, Preferred Contact: ${existingVisitInfo.preferredContact || 'none'}` : ''}
-            
-            Return your response in this exact JSON format:
-            {
-                "email": "extracted email address or null if not found",
-                "mailingAddress": "extracted mailing address or null if not found", 
-                "preferredContact": "phone or email based on user preference, or null if not found",
-                "foundEmail": true/false,
-                "foundAddress": true/false,
-                "foundPreference": true/false
-            }
-            
-            Make sure to return ONLY valid JSON, no additional text.`;
-
-        try {
-            const aiResponse = await generateText({
-                runtime: _runtime,
-                context: extractionContext,
-                modelClass: ModelClass.SMALL
-            });
-
-            const parsed = JSON.parse(aiResponse);
-            
-            // Merge with existing info if we have any
-            let finalEmail = parsed.foundEmail && parsed.email ? parsed.email : (existingVisitInfo?.email || null);
-            let finalAddress = parsed.foundAddress && parsed.mailingAddress ? parsed.mailingAddress : (existingVisitInfo?.mailingAddress || null);
-            let finalPreference = parsed.foundPreference && parsed.preferredContact ? parsed.preferredContact : (existingVisitInfo?.preferredContact || null);
-            
-            elizaLogger.info(`=== VISIT INFO EXTRACTION ===`);
-            elizaLogger.info(`Extracted email: ${parsed.foundEmail ? parsed.email : 'NO'}`);
-            elizaLogger.info(`Extracted address: ${parsed.foundAddress ? parsed.mailingAddress : 'NO'}`);
-            elizaLogger.info(`Extracted preference: ${parsed.foundPreference ? parsed.preferredContact : 'NO'}`);
-            elizaLogger.info(`Final email: ${finalEmail || 'NO'}`);
-            elizaLogger.info(`Final address: ${finalAddress || 'NO'}`);
-            elizaLogger.info(`Final preference: ${finalPreference || 'NO'}`);
-            elizaLogger.info(`============================`);
-
-            // If we found all required info, save them and proceed
-            if (finalEmail && finalAddress && finalPreference) {
-                const visitInfo = {
-                    email: finalEmail,
-                    mailingAddress: finalAddress,
-                    preferredContact: finalPreference,
-                    collectedAt: new Date().toISOString()
-                };
-                
-                elizaLogger.info(`=== SAVING VISIT INFO ===`);
-                elizaLogger.info(`visitInfo object: ${JSON.stringify(visitInfo)}`);
-                
-                // Save visit information (overwrite any previous partial info)
-                await saveUserResponse(_runtime, _message, "visit_info", JSON.stringify(visitInfo));
-                elizaLogger.info(`Visit info saved to visit_info category`);
-                
-                // Update user status with visit information
-                const statusUpdate = `Visit info collected - Email: ${finalEmail}, Address: ${finalAddress}, Preferred Contact: ${finalPreference}`;
-                await updateUserStatus(_runtime, _message, statusUpdate);
-                
-                // Get user name for personalized response
-                const userName = await getUserFirstName(_runtime, _message);
-                
-                // Complete visit scheduling with personalized response
-                const response = `Perfect${userName ? `, ${userName}` : ''}! I have all the information I need. I'll send you a confirmation and directions to your ${finalPreference === 'email' ? 'email' : 'phone'}. Our team will also follow up to make sure you have everything you need for your visit. We're excited to welcome you and show you what makes Grand Villa special!`;
-                
-                await _runtime.messageManager.createMemory({
-                    roomId: _message.roomId,
-                    userId: _message.userId,
-                    agentId: _message.agentId,
-                    content: { 
-                        text: response,
-                        metadata: {
-                            stage: "visit_scheduled"
-                        }
-                    }
-                });
-                
-                elizaLogger.info(`Stored complete visit info and moving to visit_scheduled`);
-                return response;
-            }
-            
-            // Save partial visit info if we have new information
-            if (finalEmail || finalAddress || finalPreference) {
-                const partialVisitInfo = {
-                    email: finalEmail,
-                    mailingAddress: finalAddress,
-                    preferredContact: finalPreference,
-                    collectedAt: new Date().toISOString()
-                };
-                
-                elizaLogger.info(`=== SAVING PARTIAL VISIT INFO ===`);
-                elizaLogger.info(`partialVisitInfo object: ${JSON.stringify(partialVisitInfo)}`);
-                
-                await saveUserResponse(_runtime, _message, "visit_info", JSON.stringify(partialVisitInfo));
-                elizaLogger.info(`Partial visit info saved to visit_info category`);
-            }
-            
-            // If we're missing information, ask for what's missing
-            let missingInfoResponse = "";
-            const missing = [];
-            if (!finalEmail) missing.push("email address");
-            if (!finalAddress) missing.push("mailing address");
-            if (!finalPreference) missing.push("preferred contact method");
-            
-            if (missing.length === 3) {
-                missingInfoResponse = "Perfect! To complete your visit scheduling, I'll need your email address, mailing address, and whether you prefer to be contacted by phone or email. Could you share those with me?";
-            } else if (missing.length === 2) {
-                missingInfoResponse = `Great! I just need your ${missing.join(" and ")} to complete the scheduling. Could you provide those for me?`;
-            } else if (missing.length === 1) {
-                missingInfoResponse = `Almost there! I just need your ${missing[0]} to finish setting up your visit. Could you share that with me?`;
-            }
-            
-            // Stay in schedule_visit stage
-            await _runtime.messageManager.createMemory({
-                roomId: _message.roomId,
-                userId: _message.userId,
-                agentId: _message.agentId,
-                content: { 
-                    text: missingInfoResponse,
-                    metadata: {
-                        stage: "schedule_visit"
-                    }
-                }
-            });
-            
-            return missingInfoResponse;
-            
-        } catch (error) {
-            elizaLogger.error("Error extracting visit info:", error);
-            // Fallback to asking for visit info
-            const fallbackResponse = "Perfect! To complete your visit scheduling, I'll need your email address, mailing address, and whether you prefer to be contacted by phone or email. Could you share those with me?";
-            
-            await _runtime.messageManager.createMemory({
-                roomId: _message.roomId,
-                userId: _message.userId,
-                agentId: _message.agentId,
-                content: { 
-                    text: fallbackResponse,
-                    metadata: {
-                        stage: "schedule_visit"
-                    }
-                }
-            });
-            
-            return fallbackResponse;
-        }
-    }
-    
-    // First interaction in schedule_visit stage - natural transition from info_sharing
-    const userName = await getUserFirstName(_runtime, _message);
-    const initialResponse = `That's wonderful${userName ? `, ${userName}` : ''}! I can see Grand Villa would be a great fit for your family. Let's get your visit scheduled so you can experience it firsthand. I'll need your email address, mailing address, and whether you prefer to be contacted by phone or email to send you confirmation and directions.`;
-    
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: { 
-            text: initialResponse,
-            metadata: {
-                stage: "schedule_visit"
-            }
-        }
-    });
-    
-    elizaLogger.info(`Stored initial visit scheduling request in schedule_visit stage`);
+  
     return initialResponse;
-}
+  }
+  
+
+  async function handleAdditionalInfo(
+    _runtime: IAgentRuntime,
+    _message: Memory,
+    _state: State,
+    discoveryState: any,
+    gracePersonality: string
+  ): Promise<string> {
+    elizaLogger.info("Handling schedule visit (additional info) stage");
+  
+    // Only run extraction when we have a fresh user message
+    if (_message.content.text && _message.userId !== _message.agentId) {
+      // 1) Gather recent user texts within the schedule_visit stage
+      let scheduleVisitResponses = await getUserAnswersFromStage(
+        _runtime,
+        _message,
+        "schedule_visit"
+      );
+  
+      // Fallback: last N user-only messages from this room
+      if (scheduleVisitResponses.length === 0) {
+        elizaLogger.info(
+          "Stage-based approach returned empty, using fallback to get current user's recent messages"
+        );
+        const allMemories = await _runtime.messageManager.getMemories({
+          roomId: _message.roomId,
+          count: 20,
+        });
+  
+        scheduleVisitResponses = allMemories
+          .filter(
+            (mem) =>
+              mem.userId === _message.userId &&
+              mem.userId !== _message.agentId &&
+              mem.content.text?.trim()
+          )
+          .sort(
+            (a, b) =>
+              new Date(a.createdAt || 0).getTime() -
+              new Date(b.createdAt || 0).getTime()
+          )
+          .slice(-5)
+          .map((mem) => mem.content.text!);
+      }
+  
+      const allScheduleVisitText = scheduleVisitResponses.join(" ");
+      elizaLogger.info("=== SCHEDULE VISIT RESPONSES (rollup) ===");
+      elizaLogger.info(allScheduleVisitText);
+      elizaLogger.info("=========================================");
+  
+      // 2) Load any existing visit info to merge with
+      const existingVisitInfo = await getVisitInfo(_runtime, _message);
+  
+      // 3) Extract Email / Address / Preferred contact / Heard-about-us
+      const extractionContext = `Extract from: "${allScheduleVisitText}"
+  
+  Return ONLY valid JSON:
+  {
+    "email": "user@domain.com or null",
+    "mailingAddress": "street/city/state/zip (partial allowed) or null",
+    "preferredContact": "phone or email or null",
+    "heardAboutUs": "how they heard about us (e.g., google, friend, physician, facebook, ad, website, drive-by, other) or null",
+    "foundEmail": true/false,
+    "foundAddress": true/false,
+    "foundPreference": true/false,
+    "foundHeard": true/false
+  }`;
+  
+      try {
+        const aiResponse = await generateText({
+          runtime: _runtime,
+          context: extractionContext,
+          modelClass: ModelClass.SMALL,
+        });
+  
+        const parsed = JSON.parse(aiResponse);
+  
+        // Merge with what we might already have
+        const finalEmail =
+          (parsed.foundEmail && parsed.email) ||
+          existingVisitInfo?.email ||
+          null;
+  
+        const finalAddress =
+          (parsed.foundAddress && parsed.mailingAddress) ||
+          existingVisitInfo?.mailingAddress ||
+          null;
+  
+        const finalPreference =
+          (parsed.foundPreference && parsed.preferredContact) ||
+          existingVisitInfo?.preferredContact ||
+          null;
+  
+        const priorHeard = (existingVisitInfo as any)?.heardAboutUs || null; // cast to avoid TS complaints if type isn't updated yet
+        const finalHeardAbout =
+          (parsed.foundHeard && parsed.heardAboutUs) || priorHeard || null;
+  
+        elizaLogger.info("=== VISIT INFO EXTRACTION ===");
+        elizaLogger.info(
+          `Extracted -> email:${parsed.email ?? "null"} | address:${
+            parsed.mailingAddress ?? "null"
+          } | pref:${parsed.preferredContact ?? "null"} | heard:${
+            parsed.heardAboutUs ?? "null"
+          }`
+        );
+        elizaLogger.info(
+          `Final -> email:${finalEmail ?? "null"} | address:${
+            finalAddress ?? "null"
+          } | pref:${finalPreference ?? "null"} | heard:${
+            finalHeardAbout ?? "null"
+          }`
+        );
+        elizaLogger.info("=============================");
+  
+        // 4) If we have any new info, save it (overwrite with most complete snapshot)
+        if (finalEmail || finalAddress || finalPreference || finalHeardAbout) {
+          const snapshot = {
+            email: finalEmail,
+            mailingAddress: finalAddress,
+            preferredContact: finalPreference,
+            heardAboutUs: finalHeardAbout,
+            collectedAt: new Date().toISOString(),
+          };
+  
+          await saveUserResponse(
+            _runtime,
+            _message,
+            "visit_info",
+            JSON.stringify(snapshot)
+          );
+          elizaLogger.info(`Saved visit_info snapshot: ${JSON.stringify(snapshot)}`);
+  
+          // Also reflect in a user status line (useful for ops logs)
+          const statusUpdate = `Visit info → email:${
+            finalEmail ?? "—"
+          }, address:${finalAddress ?? "—"}, preferred:${
+            finalPreference ?? "—"
+          }, heard:${finalHeardAbout ?? "—"}`;
+          await updateUserStatus(_runtime, _message, statusUpdate);
+        }
+  
+        // 5) Decide what we still need and ask just for that
+        const missing: string[] = [];
+        if (!finalEmail) missing.push("email address");
+        if (!finalAddress) missing.push("mailing address");
+        if (!finalPreference) missing.push("preferred contact method");
+        if (!finalHeardAbout) missing.push("how you heard about us");
+  
+        // If nothing is missing, close the loop warmly
+        if (missing.length === 0) {
+          const userName = await getUserFirstName(_runtime, _message);
+          const response = `Perfect${userName ? `, ${userName}` : ""}! I’ve got your details noted. I’ll send confirmation and directions to your ${
+            finalPreference === "email" ? "email" : "phone"
+          }. Thanks for sharing how you heard about us—that really helps. We’re excited to welcome you for your visit!`;
+  
+          await _runtime.messageManager.createMemory({
+            roomId: _message.roomId,
+            userId: _message.userId,
+            agentId: _message.agentId,
+            content: {
+              text: response,
+              // Keep stage as schedule_visit (booking may still happen separately)
+              metadata: { stage: "schedule_visit", visit_info_complete: true },
+            },
+          });
+  
+          return response;
+        }
+  
+        // We still need something → ask *only* for the missing bits
+        let ask: string;
+        if (missing.length === 1) {
+          ask = `Almost there! I just need your ${missing[0]} to finish setting up your visit.`;
+        } else if (missing.length === 2) {
+          ask = `Great! I just need your ${missing.join(
+            " and "
+          )} to complete the scheduling.`;
+        } else {
+          ask = `Perfect! To complete your visit scheduling, I’ll need your ${missing
+            .slice(0, -1)
+            .join(", ")} and ${missing.slice(-1)}.`;
+        }
+  
+        await _runtime.messageManager.createMemory({
+          roomId: _message.roomId,
+          userId: _message.userId,
+          agentId: _message.agentId,
+          content: { text: ask, metadata: { stage: "schedule_visit" } },
+        });
+  
+        return ask;
+      } catch (error) {
+        elizaLogger.error("Error extracting visit info:", error);
+        const fallback =
+          "Perfect! To complete your visit scheduling, I’ll need your email address, mailing address, your preferred contact method (phone or email), and how you heard about us.";
+        await _runtime.messageManager.createMemory({
+          roomId: _message.roomId,
+          userId: _message.userId,
+          agentId: _message.agentId,
+          content: { text: fallback, metadata: { stage: "schedule_visit" } },
+        });
+        return fallback;
+      }
+    }
+  
+    // First touch in this stage (no user text yet)
+    const userName = await getUserFirstName(_runtime, _message);
+    const initial =
+      `That's wonderful${userName ? `, ${userName}` : ""}! Let’s get your visit scheduled so you can experience it firsthand. ` +
+      `Could you share your email address, mailing address, your preferred contact method (phone or email), and how you heard about us?`;
+  
+    await _runtime.messageManager.createMemory({
+      roomId: _message.roomId,
+      userId: _message.userId,
+      agentId: _message.agentId,
+      content: { text: initial, metadata: { stage: "schedule_visit" } },
+    });
+  
+    return initial;
+  }
+  
 
 // State Management Functions
 async function getDiscoveryState(_runtime: IAgentRuntime, _message: Memory): Promise<any> {
@@ -2538,7 +2633,7 @@ async function getUserFirstName(_runtime: IAgentRuntime, _message: Memory): Prom
 }
 
 // Helper function to get stored contact information
-async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{name?: string, phone?: string, loved_one_name?: string} | null> {
+async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{name?: string, location?: string, loved_one_name?: string} | null> {
     try {
         // First try to get from comprehensive record
         const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
@@ -2546,10 +2641,10 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
             const contactInfo = comprehensiveRecord.contact_info;
             elizaLogger.info(`getContactInfo - RAW comprehensive record: ${JSON.stringify(comprehensiveRecord)}`);
             elizaLogger.info(`getContactInfo - RAW contact_info: ${JSON.stringify(contactInfo)}`);
-            elizaLogger.info(`getContactInfo - from comprehensive record: Name=${contactInfo.name}, Phone=${contactInfo.phone}, Loved One=${contactInfo.loved_one_name}`);
+            elizaLogger.info(`getContactInfo - from comprehensive record: Name=${contactInfo.name}, Location=${contactInfo.location}, Loved One=${contactInfo.loved_one_name}`);
             return { 
                 name: contactInfo.name, 
-                phone: contactInfo.phone, 
+                location: contactInfo.location, 
                 loved_one_name: contactInfo.loved_one_name 
             };
         }
@@ -2566,7 +2661,7 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
             const latestContactInfo = contactInfoArray[contactInfoArray.length - 1];
             elizaLogger.info(`getContactInfo - latestContactInfo (raw): ${latestContactInfo}`);
             
-            // Handle the messy format: "[Discovery Response] {"name":"Chris","phone":"..."}"
+            // Handle the messy format: "[Discovery Response] {"name":"Chris","location":"..."}"
             let cleanJsonString = latestContactInfo;
             
             // If it starts with "[Discovery Response]", extract the JSON part
@@ -2580,8 +2675,8 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
             
             const parsed = JSON.parse(cleanJsonString);
             elizaLogger.info(`getContactInfo - parsed: ${JSON.stringify(parsed)}`);
-            elizaLogger.info(`Retrieved contact info: Name=${parsed.name}, Phone=${parsed.phone}, Loved One=${parsed.loved_one_name}`);
-            return { name: parsed.name, phone: parsed.phone, loved_one_name: parsed.loved_one_name };
+            elizaLogger.info(`Retrieved contact info: Name=${parsed.name}, Location=${parsed.location}, Loved One=${parsed.loved_one_name}`);
+            return { name: parsed.name, location: parsed.location, loved_one_name: parsed.loved_one_name };
         }
         
         elizaLogger.info(`getContactInfo - no contact info found`);
