@@ -1044,7 +1044,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         • Responds calmly without asking for more.
 
         - "Unexpected situation" → In the last message: "${_message.content.text}"
-        • Contains a direct question (contains "?", "what", "how", "why", etc.).
+        • Contains any question or curious about something (contains "what", "when", "how", "why", etc.).
         • Expresses curiosity with phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…".
         • Requests extra details about pricing, services, amenities, locations, or policies.
         • Expresses frustration, confusion, or complains ("too many questions", "when does this end?").
@@ -1053,7 +1053,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
         - Stay warm and personal.
-        - Naturally use user's name: ${userName} and his loved one's name: ${lovedOneName} in the reply.
+        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
 
@@ -1064,7 +1064,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 40–60 words.
+        - Keep response within 50–70 words.
 
         Return ONLY a JSON object:
         {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
@@ -1246,7 +1246,7 @@ I need to ask next: "${nextQuestion}"
         • Responds calmly without asking for more.
 
         - "Unexpected situation" → In the last message: "${lastUserText}"
-        • Contains a direct question (contains "?", "what", "how", "why", etc.).
+        • Contains any question or curious about something (contains "what", "when", "how", "why", etc.).
         • Expresses curiosity with phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…".
         • Requests extra details about pricing, services, amenities, locations, or policies.
         • Expresses frustration, confusion, or complains ("too many questions", "when does this end?").
@@ -1255,18 +1255,18 @@ I need to ask next: "${nextQuestion}"
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
         - Stay warm and personal.
-        - Naturally use user's name: ${userName} and his loved one's name: ${lovedOneName} in the reply.
+        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
 
         2. If status is "Unexpected situation":
-        - Look at the last message: "${_message.content.text}".
+        - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
         - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 40–60 words.
+        - Keep response within 50–70 words.
 
         Return ONLY a JSON object:
         {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
@@ -1457,7 +1457,7 @@ I need to ask next: "${nextQuestion}"
         • Responds calmly without asking for more.
 
         - "Unexpected situation" → In the last message: "${lastUserText}"
-        • Contains a direct question (contains "?", "what", "how", "why", etc.).
+        • Contains any question or curious about something (contains "what", "when", "how", "why", etc.).
         • Expresses curiosity with phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…".
         • Requests extra details about pricing, services, amenities, locations, or policies.
         • Expresses frustration, confusion, or complains ("too many questions", "when does this end?").
@@ -1466,18 +1466,18 @@ I need to ask next: "${nextQuestion}"
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
         - Stay warm and personal.
-        - Naturally use user's name: ${userName} and his loved one's name: ${lovedOneName} in the reply.
+        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
 
         2. If status is "Unexpected situation":
-        - Look at the last message: "${_message.content.text}".
+        - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
         - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 40–60 words.
+        - Keep response within 50–70 words.
 
         Return ONLY a JSON object:
         {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
@@ -1667,7 +1667,7 @@ I need to ask next: "${nextQuestion}"
         • Responds calmly without asking for more.
 
         - "Unexpected situation" → In the last message: "${lastUserText}"
-        • Contains a direct question (contains "?", "what", "how", "why", etc.).
+        • Contains any question or curious about something (contains "what", "when", "how", "why", etc.).
         • Expresses curiosity with phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…".
         • Requests extra details about pricing, services, amenities, locations, or policies.
         • Expresses frustration, confusion, or complains ("too many questions", "when does this end?").
@@ -1676,18 +1676,18 @@ I need to ask next: "${nextQuestion}"
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
         - Stay warm and personal.
-        - Naturally use user's name: ${userName} and his loved one's name: ${lovedOneName} in the reply.
+        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
 
         2. If status is "Unexpected situation":
-        - Look at the last message: "${_message.content.text}".
+        - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
         - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 40–60 words.
+        - Keep response within 50–70 words.
 
         Return ONLY a JSON object:
         {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
@@ -1751,7 +1751,7 @@ I need to ask next: "${nextQuestion}"
 // Needs Matching Handler
 async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string, lastUserMessage: string): Promise<string> {
     // Check if this is a user response (not the initial transition)
-    const isUserResponse = (_message.content.text && _message.userId !== _message.agentId) ? _message.content.text : lastUserMessage;
+    const isUserResponse = _message.content.text && _message.userId !== _message.agentId;
     
     // Save user response from this stage
     if (isUserResponse) {
@@ -1770,6 +1770,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     
     elizaLogger.info(`=== NEEDS MATCHING STAGE ===`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
@@ -1780,6 +1781,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     // If this is NOT a user response (initial transition), stay in needs_matching and provide the matching response
     if (!isUserResponse) {
         // Combine all previous answers for comprehensive analysis
+        elizaLogger.info("start needs matching")
         const allPreviousAnswers = [
             ...situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
             ...lifestyleQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
