@@ -1028,36 +1028,60 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     // Get any previous answers to provide context
     const previousAnswers = situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
+    // STEP 1: Determine situation classification
+    const classificationContext = `Analyze the user's message and classify the situation.
+
+        User message: "${_message.content.text}"
+        
+        === CLASSIFICATION RULES ===
+        Classify as "Unexpected situation" if the message contains:
+        • Any question or curiosity about something
+        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
+        • Requests for extra details about pricing, services, amenities, locations, or policies
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when can I get information?")
+        
+        Otherwise, classify as "Normal situation".
+        
+        Return ONLY a JSON object:
+        {"status": "Normal situation" or "Unexpected situation"}`;
+    
+    let status = "Normal situation";
+    
+    try {
+        const classificationResponse = await generateText({
+            runtime: _runtime,
+            context: classificationContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const classification = JSON.parse(classificationResponse);
+        status = classification.status || "Normal situation";
+        
+        elizaLogger.info(`Situation classified as: ${status}`);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to classify situation:", error);
+        status = "Normal situation"; // Default fallback
+    }
+    
+    // STEP 2: Generate appropriate response based on classification
     const responseContext = `The user ${userName ? `(${userName}) ` : ''} is sharing their senior living situation.
 
         Progress: ${currentAnsweredCount}/4 questions answered so far.
         ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
-
-        I need to ask next: "${nextQuestion}"
-
-        === STATUS CLASSIFICATION RULES ===
-        Always classify as either "Normal situation" or "Unexpected situation":
-
-        - "Normal situation" → In the last message: "${_message.content.text}"
-        • Simply answers the current question.
-        • Shares straightforward info about their loved one.
-        • Responds calmly without asking for more.
-
-        - "Unexpected situation" → In the last message: "${_message.content.text}"
-        • Contains any question or curious about something (contains "what", "when", "how", "why", etc.).
-        • Expresses curiosity with phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…".
-        • Requests extra details about pricing, services, amenities, locations, or policies.
-        • Expresses frustration, confusion, or complains ("too many questions", "when does this end?").
-        • Changes topic or goes outside the current flow.
+        User's last message: "${_message.content.text}"
+        Situation classification: "${status}"
+        Next question to ask: "${nextQuestion}"
 
         === RESPONSE INSTRUCTIONS ===
-        1. If status is "Normal situation":
+        ${status === "Normal situation" ? `
+        1. For "Normal situation":
         - Stay warm and personal.
         - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
-
-        2. If status is "Unexpected situation":
+        ` : `
+        2. For "Unexpected situation":
         - Look at the last message: "${_message.content.text}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
@@ -1065,9 +1089,10 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
         - Keep response within 50–70 words.
+        `}
 
-        Return ONLY a JSON object:
-        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
+        Return ONLY the response text, no JSON formatting.`;
+    
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
@@ -1075,11 +1100,8 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
             modelClass: ModelClass.MEDIUM
         });
         
-        // Parse the AI response
-        const analysis = safeParseAIResponse(aiResponse);
-        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        const status = analysis.status;
-
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
         elizaLogger.info("chris_response1", responseContext, aiResponse);
         
         // Set global responseStatus for callback
@@ -1230,36 +1252,60 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
 
     const lastUserText = _message.content.text ? _message.content.text: lastUserMessage;
     
+    // STEP 1: Determine situation classification
+    const classificationContext = `Analyze the user's message and classify the situation.
+
+        User message: "${lastUserText}"
+        
+        === CLASSIFICATION RULES ===
+        Classify as "Unexpected situation" if the message contains:
+        • Any question or curiosity about something
+        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
+        • Requests for extra details about pricing, services, amenities, locations, or policies
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        
+        Otherwise, classify as "Normal situation".
+        
+        Return ONLY a JSON object:
+        {"status": "Normal situation" or "Unexpected situation"}`;
+    
+    let status = "Normal situation";
+    
+    try {
+        const classificationResponse = await generateText({
+            runtime: _runtime,
+            context: classificationContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const classification = JSON.parse(classificationResponse);
+        status = classification.status || "Normal situation";
+        
+        elizaLogger.info(`Situation classified as: ${status}`);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to classify situation:", error);
+        status = "Normal situation"; // Default fallback
+    }
+    
+    // STEP 2: Generate appropriate response based on classification
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's lifestyle and daily activities. 
     
-Progress: ${currentAnsweredCount}/2 questions answered so far.
-${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
-
-I need to ask next: "${nextQuestion}"
-
-=== STATUS CLASSIFICATION RULES ===
-        Always classify as either "Normal situation" or "Unexpected situation":
-
-        - "Normal situation" → In the last message: "${lastUserText}"
-        • Simply answers the current question.
-        • Shares straightforward info about their loved one.
-        • Responds calmly without asking for more.
-
-        - "Unexpected situation" → In the last message: "${lastUserText}"
-        • Contains any question or curious about something (contains "what", "when", "how", "why", etc.).
-        • Expresses curiosity with phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…".
-        • Requests extra details about pricing, services, amenities, locations, or policies.
-        • Expresses frustration, confusion, or complains ("too many questions", "when does this end?").
-        • Changes topic or goes outside the current flow.
+        Progress: ${currentAnsweredCount}/2 questions answered so far.
+        ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        User's last message: "${lastUserText}"
+        Situation classification: "${status}"
+        Next question to ask: "${nextQuestion}"
 
         === RESPONSE INSTRUCTIONS ===
-        1. If status is "Normal situation":
+        ${status === "Normal situation" ? `
+        1. For "Normal situation":
         - Stay warm and personal.
         - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
-
-        2. If status is "Unexpected situation":
+        ` : `
+        2. For "Unexpected situation":
         - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
@@ -1267,9 +1313,9 @@ I need to ask next: "${nextQuestion}"
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
         - Keep response within 50–70 words.
+        `}
 
-        Return ONLY a JSON object:
-        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
+        Return ONLY the response text, no JSON formatting.`;
     
     try {
         const aiResponse = await generateText({
@@ -1278,9 +1324,8 @@ I need to ask next: "${nextQuestion}"
             modelClass: ModelClass.MEDIUM
         });
         
-        const analysis = safeParseAIResponse(aiResponse);
-        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        const status = analysis.status;
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
         elizaLogger.info("chris_response2", responseContext, aiResponse);
         
         // Set global responseStatus for callback
@@ -1441,36 +1486,60 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
 
     const lastUserText = _message.content.text ? _message.content.text : lastUserMessage;
     
+    // STEP 1: Determine situation classification
+    const classificationContext = `Analyze the user's message and classify the situation.
+
+        User message: "${lastUserText}"
+        
+        === CLASSIFICATION RULES ===
+        Classify as "Unexpected situation" if the message contains:
+        • Any question or curiosity about something
+        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
+        • Requests for extra details about pricing, services, amenities, locations, or policies
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        
+        Otherwise, classify as "Normal situation".
+        
+        Return ONLY a JSON object:
+        {"status": "Normal situation" or "Unexpected situation"}`;
+    
+    let status = "Normal situation";
+    
+    try {
+        const classificationResponse = await generateText({
+            runtime: _runtime,
+            context: classificationContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const classification = JSON.parse(classificationResponse);
+        status = classification.status || "Normal situation";
+        
+        elizaLogger.info(`Situation classified as: ${status}`);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to classify situation:", error);
+        status = "Normal situation"; // Default fallback
+    }
+    
+    // STEP 2: Generate appropriate response based on classification
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's readiness and family involvement.
     
-Progress: ${currentAnsweredCount}/3 questions answered so far.
-${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
-
-I need to ask next: "${nextQuestion}"
-
-=== STATUS CLASSIFICATION RULES ===
-        Always classify as either "Normal situation" or "Unexpected situation":
-
-        - "Normal situation" → In the last message: "${lastUserText}"
-        • Simply answers the current question.
-        • Shares straightforward info about their loved one.
-        • Responds calmly without asking for more.
-
-        - "Unexpected situation" → In the last message: "${lastUserText}"
-        • Contains any question or curious about something (contains "what", "when", "how", "why", etc.).
-        • Expresses curiosity with phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…".
-        • Requests extra details about pricing, services, amenities, locations, or policies.
-        • Expresses frustration, confusion, or complains ("too many questions", "when does this end?").
-        • Changes topic or goes outside the current flow.
+        Progress: ${currentAnsweredCount}/3 questions answered so far.
+        ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        User's last message: "${lastUserText}"
+        Situation classification: "${status}"
+        Next question to ask: "${nextQuestion}"
 
         === RESPONSE INSTRUCTIONS ===
-        1. If status is "Normal situation":
+        ${status === "Normal situation" ? `
+        1. For "Normal situation":
         - Stay warm and personal.
         - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
-
-        2. If status is "Unexpected situation":
+        ` : `
+        2. For "Unexpected situation":
         - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
@@ -1478,9 +1547,9 @@ I need to ask next: "${nextQuestion}"
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
         - Keep response within 50–70 words.
+        `}
 
-        Return ONLY a JSON object:
-        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
+        Return ONLY the response text, no JSON formatting.`;
     
     try {
         const aiResponse = await generateText({
@@ -1489,11 +1558,10 @@ I need to ask next: "${nextQuestion}"
             modelClass: ModelClass.MEDIUM
         });
         
-        const analysis = safeParseAIResponse(aiResponse);
-        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        const status = analysis.status;
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         
         elizaLogger.info("chris_response3", responseContext, aiResponse);
+        
         // Set global responseStatus for callback
         setGlobalResponseStatus(status);
         
@@ -1504,7 +1572,7 @@ I need to ask next: "${nextQuestion}"
             content: {
                 text: response,
                 metadata: { 
-                    askedQuestion: nextQuestion,
+                    askedQuestion: response,
                     stage: "readiness_discovery",
                     responseStatus: status
                 }
@@ -1527,7 +1595,7 @@ I need to ask next: "${nextQuestion}"
             content: {
                 text: fallbackResponse,
                 metadata: { 
-                    askedQuestion: nextQuestion,
+                    askedQuestion: fallbackResponse,
                     stage: "readiness_discovery",
                     responseStatus: "Normal situation"
                 }
@@ -1651,36 +1719,60 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
 
     const lastUserText = _message.content.text ? _message.content.text : lastUserMessage;
     
+    // STEP 1: Determine situation classification
+    const classificationContext = `Analyze the user's message and classify the situation.
+
+        User message: "${lastUserText}"
+        
+        === CLASSIFICATION RULES ===
+        Classify as "Unexpected situation" if the message contains:
+        • Any question or curiosity about something
+        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
+        • Requests for extra details about pricing, services, amenities, locations, or policies
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        
+        Otherwise, classify as "Normal situation".
+        
+        Return ONLY a JSON object:
+        {"status": "Normal situation" or "Unexpected situation"}`;
+    
+    let status = "Normal situation";
+    
+    try {
+        const classificationResponse = await generateText({
+            runtime: _runtime,
+            context: classificationContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const classification = JSON.parse(classificationResponse);
+        status = classification.status || "Normal situation";
+        
+        elizaLogger.info(`Situation classified as: ${status}`);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to classify situation:", error);
+        status = "Normal situation"; // Default fallback
+    }
+    
+    // STEP 2: Generate appropriate response based on classification
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their priorities and what's important in choosing a senior living community.
     
-Progress: ${currentAnsweredCount}/2 questions answered so far.
-${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
-
-I need to ask next: "${nextQuestion}"
-
-=== STATUS CLASSIFICATION RULES ===
-        Always classify as either "Normal situation" or "Unexpected situation":
-
-        - "Normal situation" → In the last message: "${lastUserText}".
-        • Simply answers the current question.
-        • Shares straightforward info about their loved one.
-        • Responds calmly without asking for more.
-
-        - "Unexpected situation" → In the last message: "${lastUserText}"
-        • Contains any question or curious about something (contains "what", "when", "how", "why", etc.).
-        • Expresses curiosity with phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…".
-        • Requests extra details about pricing, services, amenities, locations, or policies.
-        • Expresses frustration, confusion, or complains ("too many questions", "when does this end?").
-        • Changes topic or goes outside the current flow.
+        Progress: ${currentAnsweredCount}/2 questions answered so far.
+        ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        User's last message: "${lastUserText}"
+        Situation classification: "${status}"
+        Next question to ask: "${nextQuestion}"
 
         === RESPONSE INSTRUCTIONS ===
-        1. If status is "Normal situation":
+        ${status === "Normal situation" ? `
+        1. For "Normal situation":
         - Stay warm and personal.
         - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
-
-        2. If status is "Unexpected situation":
+        ` : `
+        2. For "Unexpected situation":
         - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
@@ -1688,9 +1780,9 @@ I need to ask next: "${nextQuestion}"
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
         - Keep response within 50–70 words.
+        `}
 
-        Return ONLY a JSON object:
-        {"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
+        Return ONLY the response text, no JSON formatting.`;
     
     try {
         const aiResponse = await generateText({
@@ -1699,11 +1791,10 @@ I need to ask next: "${nextQuestion}"
             modelClass: ModelClass.MEDIUM
         });
         
-        const analysis = safeParseAIResponse(aiResponse);
-        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        const status = analysis.status;
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         
         elizaLogger.info("chris_response4", responseContext, aiResponse);
+        
         // Set global responseStatus for callback
         setGlobalResponseStatus(status);
         
@@ -1770,7 +1861,6 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
-    const location = contactInfo?.location || "Florida";
     
     elizaLogger.info(`=== NEEDS MATCHING STAGE ===`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
