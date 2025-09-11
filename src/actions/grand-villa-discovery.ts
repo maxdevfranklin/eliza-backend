@@ -1053,7 +1053,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
         - Stay warm and personal.
-        - Naturally use ${userName} and ${lovedOneName} in the reply.
+        - Naturally use user's name: ${userName} and his loved one's name: ${lovedOneName} in the reply.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
 
@@ -1255,7 +1255,7 @@ I need to ask next: "${nextQuestion}"
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
         - Stay warm and personal.
-        - Naturally use ${userName} and ${lovedOneName} in the reply.
+        - Naturally use user's name: ${userName} and his loved one's name: ${lovedOneName} in the reply.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
 
@@ -1466,7 +1466,7 @@ I need to ask next: "${nextQuestion}"
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
         - Stay warm and personal.
-        - Naturally use ${userName} and ${lovedOneName} in the reply.
+        - Naturally use user's name: ${userName} and his loved one's name: ${lovedOneName} in the reply.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
 
@@ -1676,7 +1676,7 @@ I need to ask next: "${nextQuestion}"
         === RESPONSE INSTRUCTIONS ===
         1. If status is "Normal situation":
         - Stay warm and personal.
-        - Naturally use ${userName} and ${lovedOneName} in the reply.
+        - Naturally use user's name: ${userName} and his loved one's name: ${lovedOneName} in the reply.
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
 
