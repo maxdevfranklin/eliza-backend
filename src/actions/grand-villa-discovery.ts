@@ -206,7 +206,7 @@ interface ComprehensiveQA {
 const rawScheduler =
   process.env.SCHEDULE_URL ||
   process.env.SCHEDULER_URL ||
-  'http://127.0.0.1:4005';
+  'https://eliza-scheduler-production.up.railway.app/';
 
 const SCHEDULE_BASE = rawScheduler.replace(/\/+$/, ''); // strip trailing slashes
 const SCHEDULE_URL = `${SCHEDULE_BASE}/schedule`;
