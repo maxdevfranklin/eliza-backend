@@ -1,11 +1,24 @@
 # Use a specific Node.js version for better reproducibility
-FROM node:23.3.0-slim AS builder
+FROM node:20-slim AS builder
 
 # Install pnpm globally and install necessary build tools
 RUN npm install -g pnpm@9.15.1 && \
     apt-get update && \
-    apt-get install -y git python3 make g++ && \
-    apt-get clean && \
+    apt-get install -y \
+    git \
+    python3 \
+    make \
+    g++ \
+    pkg-config \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    libpixman-1-dev \
+    libopus-dev \
+    libopusfile-dev \
+    && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Set Python 3 as the default python
@@ -24,7 +37,7 @@ COPY ./src ./src
 COPY ./characters ./characters
 
 # Install dependencies and build the project
-RUN pnpm install 
+RUN pnpm install --frozen-lockfile
 RUN pnpm build 
 
 # Create dist directory and set permissions
@@ -36,13 +49,23 @@ RUN mkdir -p /app/dist && \
 USER node
 
 # Create a new stage for the final image
-FROM node:23.3.0-slim
+FROM node:20-slim
 
-# Install runtime dependencies if needed
-RUN npm install -g pnpm@9.15.1
-RUN apt-get update && \
-    apt-get install -y git python3 && \
-    apt-get clean && \
+# Install runtime dependencies
+RUN npm install -g pnpm@9.15.1 && \
+    apt-get update && \
+    apt-get install -y \
+    git \
+    python3 \
+    libcairo2 \
+    libpango-1.0-0 \
+    libjpeg62-turbo \
+    libgif7 \
+    librsvg2-2 \
+    libpixman-1-0 \
+    libopus0 \
+    libopusfile0 \
+    && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
