@@ -1,0 +1,40 @@
+{
+  "apps": [
+    {
+      "name": "eliza-main",
+      "script": "node",
+      "args": "--loader ts-node/esm src/index.ts --characters=characters/grace.json",
+      "cwd": "/home/top/Documents/work/eliza-git/eliza-backend",
+      "env": {
+        "NODE_ENV": "production",
+        "DAEMON_PROCESS": "true"
+      },
+      "instances": 1,
+      "autorestart": true,
+      "watch": false,
+      "max_memory_restart": "1G",
+      "error_file": "./logs/eliza-main-error.log",
+      "out_file": "./logs/eliza-main-out.log",
+      "log_file": "./logs/eliza-main-combined.log",
+      "time": true
+    },
+    {
+      "name": "calendar-server",
+      "script": "node",
+      "args": "--loader ts-node/esm src/server/server.ts",
+      "cwd": "/home/top/Documents/work/eliza-git/eliza-backend",
+      "env": {
+        "NODE_ENV": "production",
+        "PORT": 4005
+      },
+      "instances": 1,
+      "autorestart": true,
+      "watch": false,
+      "max_memory_restart": "1G",
+      "error_file": "./logs/calendar-server-error.log",
+      "out_file": "./logs/calendar-server-out.log",
+      "log_file": "./logs/calendar-server-combined.log",
+      "time": true
+    }
+  ]
+} 
