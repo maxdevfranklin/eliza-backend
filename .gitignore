@@ -5,6 +5,7 @@ dist
 .env
 node_modules
 dist/
+logs
 
 db.sqlite
 .idea
