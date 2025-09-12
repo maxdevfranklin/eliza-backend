@@ -916,11 +916,13 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
 
             const generationContext = `User message: "${userMessage}"
 
-            Generate response answering question based on "${grandVillaInfo}"
-            Then politely ask for missing questions for ${missingItems.join(", ")}.
-            Keep words under 40-60.
-
-            Return response only.`;
+            This is the start of the conversation. Do NOT give all the details from "${grandVillaInfo}". 
+            Instead:
+            - Briefly introduce Grand Villa in a warm and intriguing way (just one or two appealing highlights).
+            - Then naturally explain that to provide the most helpful information, you’ll need a few basics from the user.
+            - Ask politely for the missing details: ${missingItems.join(", ")}.
+            - Keep response under 30-50 words.
+            - Return ONLY the response text, no formatting or extra commentary.`
 
             const generated = await generateText({runtime: _runtime, context: generationContext, modelClass: ModelClass.SMALL});
 
