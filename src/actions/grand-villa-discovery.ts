@@ -206,35 +206,134 @@ interface ComprehensiveQA {
 const rawScheduler =
   process.env.SCHEDULE_URL ||
   process.env.SCHEDULER_URL ||
-  'http://127.0.0.1:4005';
+  'https://eliza-scheduler-production.up.railway.app/';
 
+  type BookingOk = {
+    ok: true;
+    eventId: string;
+    htmlLink: string;
+    startIso: string;
+    whenText: string;
+  };
+  type BookingErr = { ok: false; error: string };
+  type BookingResult = BookingOk | BookingErr;
+  
 const SCHEDULE_BASE = rawScheduler.replace(/\/+$/, ''); // strip trailing slashes
 const SCHEDULE_URL = `${SCHEDULE_BASE}/schedule`;
 const DEFAULT_TZ = process.env.TZ || 'America/New_York';
+elizaLogger.info("chris_schedule_param", SCHEDULE_BASE, SCHEDULE_URL, DEFAULT_TZ)
 
-type BookingResult = {
-  ok: boolean;
-  eventId?: string;
-  htmlLink?: string;
-  whenText?: string;
-  startIso?: string;
-  error?: string;
-};
-
-async function scheduleWithCalendar(args: {
-  email: string;
-  label?: string;        // e.g., "Wednesday afternoon" or "Fri 10am"
-  startIso?: string;
-  tz?: string;
-  roomId: string;
-  agentId: string;
-  summary?: string;
-  location?: string;
-}): Promise<BookingResult> {
-  const res = await fetch(SCHEDULE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+const DAY_ALIASES: Record<string, number> = {
+    sun: 0, sunday: 0,
+    mon: 1, monday: 1,
+    tue: 2, tues: 2, tuesday: 2,
+    wed: 3, weds: 3, wednesday: 3,
+    thu: 4, thur: 4, thurs: 4, thursday: 4,
+    fri: 5, friday: 5,
+    sat: 6, saturday: 6,
+  };
+  function pad(n: number) { return `${n}`.padStart(2, "0"); }
+  function toLocalISO(year: number, month: number, day: number, hh = 14, mm = 0, tz = DEFAULT_TZ) {
+    // Build local time then convert to ISO
+    const dt = new Date(
+      // create as if UTC, then adjust by timezone offset via Intl is overkill; we use fixed local -> ISO assumption:
+      // safer: use Date with local, then toISOString after setting local components
+      // but JS Date lacks tz; we rely on server TZ == DEFAULT_TZ or your scheduler does tz normalization.
+      // If your scheduler expects local wall time + tz string, it's fine to send {startIso, tz}.
+      Date.UTC(year, month - 1, day, hh, mm, 0, 0)
+    );
+    return dt.toISOString();
+  }
+  
+  /** Map vague parts of day to a canonical hour */
+  function partOfDayToHour(s: string): number {
+    const t = s.toLowerCase();
+    if (t.includes("morning")) return 10;     // 10:00
+    if (t.includes("noon") || t.includes("midday")) return 12;
+    if (t.includes("afternoon")) return 14;   // 2pm
+    if (t.includes("evening")) return 17;     // 5pm
+    if (t.includes("night")) return 18;       // 6pm
+    return 14; // default afternoon
+  }
+  
+  /**
+   * Very small parser for labels like:
+   *   "Wednesday afternoon", "Fri 10am", "tue 1:30 pm", "Friday"
+   * Returns a start ISO for the *next* occurrence of that day/time.
+   */
+  function resolveStartFromLabel(label: string, tz = DEFAULT_TZ): string | null {
+    if (!label) return null;
+    const raw = label.trim().toLowerCase();
+  
+    // Extract day of week, if any
+    const dayKey = Object.keys(DAY_ALIASES).find(k => raw.includes(k));
+    const targetDow = dayKey ? DAY_ALIASES[dayKey] : null;
+  
+    // Extract explicit time if present (e.g., 10am, 1:30 pm, 13:00)
+    let hh: number | null = null;
+    let mm = 0;
+    const timeMatch = raw.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?|(\d{1,2}):(\d{2})/);
+    if (timeMatch) {
+      const h1 = timeMatch[1] ? parseInt(timeMatch[1], 10) : (timeMatch[4] ? parseInt(timeMatch[4], 10) : NaN);
+      const m1 = timeMatch[2] ? parseInt(timeMatch[2], 10) : (timeMatch[5] ? parseInt(timeMatch[5], 10) : 0);
+      const ap = timeMatch[3];
+      if (!isNaN(h1)) {
+        if (ap) {
+          hh = (h1 % 12) + (ap.toLowerCase() === "pm" ? 12 : 0);
+        } else {
+          // 24h guess
+          hh = h1;
+        }
+        mm = isNaN(m1) ? 0 : m1;
+      }
+    } else {
+      // No explicit time: check for morning/afternoon/evening
+      hh = partOfDayToHour(raw);
+    }
+  
+    // Find next occurrence (>= today), then if that is < 48h away, push forward to satisfy the "book +48h" rule downstream
+    const now = new Date();
+    let base = new Date(now);
+    if (targetDow !== null) {
+      const delta = (targetDow - now.getDay() + 7) % 7;
+      base.setDate(now.getDate() + delta + (delta === 0 ? 7 : 0)); // If today mentioned, move to next week to avoid same-day
+    }
+    const y = base.getFullYear();
+    const m = base.getMonth() + 1;
+    const d = base.getDate();
+    const iso = toLocalISO(y, m, d, hh ?? 14, mm, tz);
+    return iso;
+  }
+  
+  /** 48h from now, rounded to nearest half hour, and nudged into business hours (9–5) */
+  function iso48hFromNow(tz = DEFAULT_TZ): string {
+    const now = new Date();
+    const t = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    // round to nearest 30 min
+    const mins = t.getUTCMinutes();
+    const rounded = mins < 15 ? 0 : mins < 45 ? 30 : 0;
+    if (rounded === 0 && mins >= 45) t.setUTCHours(t.getUTCHours() + 1);
+    t.setUTCMinutes(rounded, 0, 0);
+  
+    // Nudge into business hours 9–17 local-equivalent (approx; real TZ handling should be server-side)
+    const h = t.getUTCHours();
+    if (h < 13) t.setUTCHours(13);       // ~9am ET
+    if (h > 21) t.setUTCHours(19);       // ~3pm ET
+    return t.toISOString();
+  }
+  
+  // ---- Fixed, single definition --------------------------------
+  async function scheduleWithCalendar(args: {
+    email: string;
+    label?: string;        // "Wednesday afternoon" or "Fri 10am"
+    startIso?: string;
+    tz?: string;
+    roomId: string;
+    agentId: string;
+    summary?: string;
+    location?: string;
+  }): Promise<BookingResult> {
+    const payload = {
       email: args.email,
       label: args.label,
       startIso: args.startIso,
@@ -243,19 +342,37 @@ async function scheduleWithCalendar(args: {
       agentId: args.agentId,
       durationMin: 60,
       createMeet: true,
-      summary: args.summary ?? 'Grand Villa Tour',
-      location: args.location ?? 'Grand Villa of Clearwater',
-      // idempotency
-      externalKey: `${args.roomId}|${args.agentId}|${args.label ?? args.startIso ?? ''}`,
-    }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data?.ok === false) {
-    return { ok: false, error: data?.error || `HTTP ${res.status}` };
+      summary: args.summary ?? "Grand Villa Tour",
+      location: args.location ?? "Grand Villa of Clearwater",
+      // Include email to avoid collisions across different users
+      externalKey: `${args.roomId}|${args.agentId}|${args.email}|${args.label ?? args.startIso ?? ""}`,
+    };
+  
+    let res: Response;
+    try {
+      res = await fetch(SCHEDULE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (e: any) {
+      elizaLogger.error("scheduleWithCalendar network error", e?.message || e);
+      return { ok: false, error: "network_error" };
+    }
+  
+    let data: any = {};
+    try { data = await res.json(); } catch { /* some servers return HTML on 4xx */ }
+  
+    if (!res.ok || data?.ok === false) {
+      const err = (data && (data.error || data.message)) || `HTTP ${res.status}`;
+      elizaLogger.error("scheduleWithCalendar server error", err, data);
+      return { ok: false, error: err };
+    }
+  
+    elizaLogger.info("scheduleWithCalendar success", data);
+    return { ok: true, ...data };
   }
-  return { ok: true, ...data };
-}
+
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
     description: "Universal handler that responds to every user message, regardless of content, intent, or topic. Always triggers to ensure no user input goes unhandled.",
@@ -415,30 +532,31 @@ export const grandVillaDiscoveryAction: Action = {
             }
             
             let response_text = "";
+            let lastUserMessage = "";
             
             // Handle each stage with error protection
             try {
                 switch (conversationStage) {
                     case "trust_building":
-                        response_text = await handleTrustBuilding(_runtime, _message, _state, gracePersonality);
+                        response_text = await handleTrustBuilding(_runtime, _message, _state, gracePersonality, grandVillaInfo);
                         break;
                     case "situation_discovery":
                         response_text = await handleSituationQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
                         break;
                     case "lifestyle_discovery":
-                        response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
+                        response_text = await handleLifestyleQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo, lastUserMessage);
                         break;
                     case "readiness_discovery":
-                        response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
+                        response_text = await handleReadinessQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo, lastUserMessage);
                         break;
                     case "priorities_discovery":
-                        response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
+                        response_text = await handlePriorityQuestions(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo, lastUserMessage);
                         break;
                     case "needs_matching":
-                        response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
+                        response_text = await handleNeedsMatching(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo, lastUserMessage);
                         break;
                     case "schedule_visit":
-                        response_text = await handleScheduleVisit(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo);
+                        response_text = await handleScheduleVisit(_runtime, _message, _state, discoveryState, gracePersonality, grandVillaInfo, lastUserMessage);
                         break;
                     default:
                         response_text = await handleGeneralInquiry(_runtime, _message, _state, gracePersonality, grandVillaInfo);
@@ -770,7 +888,7 @@ async function displayQASummary(_runtime: IAgentRuntime, _message: Memory): Prom
 }
 
 // Trust Building Handler
-async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _state: State, gracePersonality: string): Promise<string> {
+async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _state: State, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     elizaLogger.info("Handling trust building stage");
     
     // Check if user provided a response (not the first interaction)
@@ -909,13 +1027,23 @@ async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _s
             if (!finalLocation) missingItems.push("your location");
             if (!finalLovedOneName) missingItems.push("your loved one's name");
             
-            if (missingItems.length === 3) {
-                missingInfoResponse = "I'd love to help you! To get started, could I get your name, location, and the name of your loved one you're looking for senior living options for?";
-            } else if (missingItems.length === 2) {
-                missingInfoResponse = `Thanks for sharing! Could I also get ${missingItems.join(" and ")}?`;
-            } else if (missingItems.length === 1) {
-                missingInfoResponse = `${finalName ? `Thanks, ${finalName}!` : 'Thanks!'} Could I also get ${missingItems[0]}?`;
-            }
+            const userMessage = _message.content.text;
+
+            const generationContext = `User message: "${userMessage}"
+
+            This is the start of the conversation. Do NOT give all the details from "${grandVillaInfo}". 
+            Instead:
+            - Briefly introduce Grand Villa in a warm and intriguing way (just one or two appealing highlights).
+            - Then naturally explain that to provide the most helpful information, you'll need a few basics from the user.
+            - Ask politely for the missing details: ${missingItems.join(", ")}.
+            - Keep response under 30-50 words.
+            - Return ONLY the response text, no formatting or extra commentary.`
+
+            const generated = await generateText({runtime: _runtime, context: generationContext, modelClass: ModelClass.SMALL});
+
+            elizaLogger.info("chris_missing", generationContext, generated);
+
+            missingInfoResponse = generated;
             
             // Stay in trust building stage
             await _runtime.messageManager.createMemory({
@@ -1063,7 +1191,8 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
             ..._message,
             content: { text: "" }
         };
-        return await handleLifestyleQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
+        elizaLogger.info("chris_parameter", _message.content.text);
+        return await handleLifestyleQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo, _message.content.text);
     }
     
     // Generate AI response that asks the next unanswered question with context
@@ -1073,40 +1202,71 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
     // Get any previous answers to provide context
     const previousAnswers = situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
     
-    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing their senior living situation.
+    // STEP 1: Determine situation classification
+    const classificationContext = `Analyze the user's message and classify the situation.
+
+        User message: "${_message.content.text}"
+        
+        === CLASSIFICATION RULES ===
+        Classify as "Unexpected situation" if the message contains:
+        • Any question or curiosity about something
+        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
+        • Requests for extra details about pricing, services, amenities, locations, or policies
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when can I get information?")
+        
+        Otherwise, classify as "Normal situation".
+        
+        Return ONLY a JSON object:
+        {"status": "Normal situation" or "Unexpected situation"}`;
     
-Progress: ${currentAnsweredCount}/4 questions answered so far.
-${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+    let status = "Normal situation";
+    
+    try {
+        const classificationResponse = await generateText({
+            runtime: _runtime,
+            context: classificationContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const classification = JSON.parse(classificationResponse);
+        status = classification.status || "Normal situation";
+        
+        elizaLogger.info(`Situation classified as: ${status}`);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to classify situation:", error);
+        status = "Normal situation"; // Default fallback
+    }
+    
+    // STEP 2: Generate appropriate response based on classification
+    const responseContext = `The user ${userName ? `(${userName}) ` : ''} is sharing their senior living situation.
 
-I need to ask next: "${nextQuestion}"
+        Progress: ${currentAnsweredCount}/4 questions answered so far.
+        ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        User's last message: "${_message.content.text}"
+        Situation classification: "${status}"
+        Next question to ask: "${nextQuestion}"
 
-=== STATUS CLASSIFICATION RULES ===
-Always decide if this is a "Normal situation" or an "Unexpected situation":
-- "Normal situation" → The user simply answers the question, shares basic info about their loved one, or responds calmly without asking for extra info.
-- "Unexpected situation" → The user:
-  • Asks a question or want to know about something (pricing, services, amenities, locations, policies, etc.)
-  • Requests clarification or more details.
-  • Expresses frustration, confusion, or complains ("too many questions", "when does this end?")
-  • Shares an emotional reaction that needs empathy (sadness, worry, humor).
-  • Changes topic or wants to know about something outside the current question.
+        === RESPONSE INSTRUCTIONS ===
+        ${status === "Normal situation" ? `
+        1. For "Normal situation":
+        - Stay warm and personal.
+        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
+        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
+        - Keep words under 30-40.
+        ` : `
+        2. For "Unexpected situation":
+        - Look at the last message: "${_message.content.text}".
+        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+            If info is missing, search online and give the most accurate answer.
+        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+        - Keep response within 50–70 words.
+        `}
 
-=== RESPONSE INSTRUCTIONS ===
-1. If status is "Normal situation":
-   - Stay warm and personal.
-   - Naturally use ${userName} and ${lovedOneName} in the reply.
-   - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-
-2. If status is "Unexpected situation":
-   - Look at the last message: "${_message.content.text}".
-   - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-     If info is missing, search online and give the most accurate answer.
-   - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
-   - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
-   - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-   - Keep response within 60–100 words.
-
-Return ONLY a JSON object:
-{"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
+        Return ONLY the response text, no JSON formatting.`;
+    
     try {
         const aiResponse = await generateText({
             runtime: _runtime,
@@ -1114,10 +1274,9 @@ Return ONLY a JSON object:
             modelClass: ModelClass.MEDIUM
         });
         
-        // Parse the AI response
-        const analysis = safeParseAIResponse(aiResponse);
-        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        const status = analysis.status;
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
+        elizaLogger.info("chris_response1", responseContext, aiResponse);
         
         // Set global responseStatus for callback
         setGlobalResponseStatus(status);
@@ -1164,7 +1323,7 @@ Return ONLY a JSON object:
 }
 
 // Lifestyle Discovery Handler  
-async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
+async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string, lastUserMessage: string): Promise<string> {
     // The 3 basic lifestyle questions we need to collect answers for
     const lifestyleQuestions = [
         "Tell me about your loved one. What does a typical day look like for them?",
@@ -1255,7 +1414,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
             ..._message,
             content: { text: "" }
         };
-        return await handleReadinessQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
+        return await handleReadinessQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo, _message.content.text);
     }
     
     // Determine which question to ask next and generate a contextual response
@@ -1264,41 +1423,73 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
     
     // Get any previous answers to provide context
     const previousAnswers = lifestyleQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
+
+    const lastUserText = _message.content.text ? _message.content.text: lastUserMessage;
     
+    // STEP 1: Determine situation classification
+    const classificationContext = `Analyze the user's message and classify the situation.
+
+        User message: "${lastUserText}"
+        
+        === CLASSIFICATION RULES ===
+        Classify as "Unexpected situation" if the message contains:
+        • Any question or curiosity about something
+        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
+        • Requests for extra details about pricing, services, amenities, locations, or policies
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        
+        Otherwise, classify as "Normal situation".
+        
+        Return ONLY a JSON object:
+        {"status": "Normal situation" or "Unexpected situation"}`;
+    
+    let status = "Normal situation";
+    
+    try {
+        const classificationResponse = await generateText({
+            runtime: _runtime,
+            context: classificationContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const classification = JSON.parse(classificationResponse);
+        status = classification.status || "Normal situation";
+        
+        elizaLogger.info(`Situation classified as: ${status}`);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to classify situation:", error);
+        status = "Normal situation"; // Default fallback
+    }
+    
+    // STEP 2: Generate appropriate response based on classification
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's lifestyle and daily activities. 
     
-Progress: ${currentAnsweredCount}/2 questions answered so far.
-${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        Progress: ${currentAnsweredCount}/2 questions answered so far.
+        ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        User's last message: "${lastUserText}"
+        Situation classification: "${status}"
+        Next question to ask: "${nextQuestion}"
 
-I need to ask next: "${nextQuestion}"
+        === RESPONSE INSTRUCTIONS ===
+        ${status === "Normal situation" ? `
+        1. For "Normal situation":
+        - Stay warm and personal.
+        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
+        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
+        - Keep words under 30-40.
+        ` : `
+        2. For "Unexpected situation":
+        - Look at the last message: "${lastUserText}".
+        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+            If info is missing, search online and give the most accurate answer.
+        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+        - Keep response within 50–70 words.
+        `}
 
-=== STATUS CLASSIFICATION RULES ===
-Always decide if this is a "Normal situation" or an "Unexpected situation":
-- "Normal situation" → The user simply answers the question, shares basic info about their loved one, or responds calmly without asking for extra info.
-- "Unexpected situation" → The user:
-  • Asks a question or want to know about something (pricing, services, amenities, locations, policies, etc.)
-  • Requests clarification or more details.
-  • Expresses frustration, confusion, or complains ("too many questions", "when does this end?")
-  • Shares an emotional reaction that needs empathy (sadness, worry, humor).
-  • Changes topic or wants to know about something outside the current question.
-
-=== RESPONSE INSTRUCTIONS ===
-1. If status is "Normal situation":
-   - Stay warm and personal.
-   - Naturally use ${userName} and ${lovedOneName} in the reply.
-   - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-
-2. If status is "Unexpected situation":
-   - Look at the last message: "${_message.content.text}".
-   - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-     If info is missing, search online and give the most accurate answer.
-   - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
-   - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
-   - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-   - Keep response within 60–100 words.
-
-Return ONLY a JSON object:
-{"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
+        Return ONLY the response text, no JSON formatting.`;
     
     try {
         const aiResponse = await generateText({
@@ -1307,9 +1498,9 @@ Return ONLY a JSON object:
             modelClass: ModelClass.MEDIUM
         });
         
-        const analysis = safeParseAIResponse(aiResponse);
-        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        const status = analysis.status;
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
+        
+        elizaLogger.info("chris_response2", responseContext, aiResponse);
         
         // Set global responseStatus for callback
         setGlobalResponseStatus(status);
@@ -1356,7 +1547,7 @@ Return ONLY a JSON object:
 }
 
 // Readiness Discovery Handler
-async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
+async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string, lastUserMessage: string): Promise<string> {
     // The 3 basic readiness questions we need to collect answers for
     const readinessQuestions = [
         "Is your loved one aware that you're looking at options?",
@@ -1452,7 +1643,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
             ..._message,
             content: { text: "" }
         };
-        return await handlePriorityQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
+        return await handlePriorityQuestions(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo, _message.content.text);
     }
     
     elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in readiness_discovery`);
@@ -1466,41 +1657,73 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
     
     // Get any previous answers to provide context
     const previousAnswers = readinessQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
+
+    const lastUserText = _message.content.text ? _message.content.text : lastUserMessage;
     
+    // STEP 1: Determine situation classification
+    const classificationContext = `Analyze the user's message and classify the situation.
+
+        User message: "${lastUserText}"
+        
+        === CLASSIFICATION RULES ===
+        Classify as "Unexpected situation" if the message contains:
+        • Any question or curiosity about something
+        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
+        • Requests for extra details about pricing, services, amenities, locations, or policies
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        
+        Otherwise, classify as "Normal situation".
+        
+        Return ONLY a JSON object:
+        {"status": "Normal situation" or "Unexpected situation"}`;
+    
+    let status = "Normal situation";
+    
+    try {
+        const classificationResponse = await generateText({
+            runtime: _runtime,
+            context: classificationContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const classification = JSON.parse(classificationResponse);
+        status = classification.status || "Normal situation";
+        
+        elizaLogger.info(`Situation classified as: ${status}`);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to classify situation:", error);
+        status = "Normal situation"; // Default fallback
+    }
+    
+    // STEP 2: Generate appropriate response based on classification
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their loved one's readiness and family involvement.
     
-Progress: ${currentAnsweredCount}/3 questions answered so far.
-${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        Progress: ${currentAnsweredCount}/3 questions answered so far.
+        ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        User's last message: "${lastUserText}"
+        Situation classification: "${status}"
+        Next question to ask: "${nextQuestion}"
 
-I need to ask next: "${nextQuestion}"
+        === RESPONSE INSTRUCTIONS ===
+        ${status === "Normal situation" ? `
+        1. For "Normal situation":
+        - Stay warm and personal.
+        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
+        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
+        - Keep words under 30-40.
+        ` : `
+        2. For "Unexpected situation":
+        - Look at the last message: "${lastUserText}".
+        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+            If info is missing, search online and give the most accurate answer.
+        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+        - Keep response within 50–70 words.
+        `}
 
-=== STATUS CLASSIFICATION RULES ===
-Always decide if this is a "Normal situation" or an "Unexpected situation":
-- "Normal situation" → The user simply answers the question, shares basic info about their loved one, or responds calmly without asking for extra info.
-- "Unexpected situation" → The user:
-  • Asks a question or want to know about something (pricing, services, amenities, locations, policies, etc.)
-  • Requests clarification or more details.
-  • Expresses frustration, confusion, or complains ("too many questions", "when does this end?")
-  • Shares an emotional reaction that needs empathy (sadness, worry, humor).
-  • Changes topic or wants to know about something outside the current question.
-
-=== RESPONSE INSTRUCTIONS ===
-1. If status is "Normal situation":
-   - Stay warm and personal.
-   - Naturally use ${userName} and ${lovedOneName} in the reply.
-   - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-
-2. If status is "Unexpected situation":
-   - Look at the last message: "${_message.content.text}".
-   - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-     If info is missing, search online and give the most accurate answer.
-   - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
-   - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
-   - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-   - Keep response within 60–100 words.
-
-Return ONLY a JSON object:
-{"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
+        Return ONLY the response text, no JSON formatting.`;
     
     try {
         const aiResponse = await generateText({
@@ -1509,11 +1732,10 @@ Return ONLY a JSON object:
             modelClass: ModelClass.MEDIUM
         });
         
-        const analysis = safeParseAIResponse(aiResponse);
-        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        const status = analysis.status;
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         
-        elizaLogger.info("chris_response", responseContext, aiResponse);
+        elizaLogger.info("chris_response3", responseContext, aiResponse);
+        
         // Set global responseStatus for callback
         setGlobalResponseStatus(status);
         
@@ -1524,7 +1746,7 @@ Return ONLY a JSON object:
             content: {
                 text: response,
                 metadata: { 
-                    askedQuestion: nextQuestion,
+                    askedQuestion: response,
                     stage: "readiness_discovery",
                     responseStatus: status
                 }
@@ -1547,7 +1769,7 @@ Return ONLY a JSON object:
             content: {
                 text: fallbackResponse,
                 metadata: { 
-                    askedQuestion: nextQuestion,
+                    askedQuestion: fallbackResponse,
                     stage: "readiness_discovery",
                     responseStatus: "Normal situation"
                 }
@@ -1559,7 +1781,7 @@ Return ONLY a JSON object:
 }
 
 // Priority Discovery Handler
-async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
+async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string, lastUserMessage: string): Promise<string> {
     // The 3 priority questions we need to collect answers for
     const priorityQuestions = [
         "What's most important to you regarding the community you may choose?",
@@ -1654,7 +1876,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
             ..._message,
             content: { text: "" }
         };
-        return await handleNeedsMatching(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
+        return await handleNeedsMatching(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo, _message.content.text);
     }
     
     elizaLogger.info(`⏳ STILL NEED ${remainingQuestions.length} MORE ANSWERS - staying in priorities_discovery`);
@@ -1668,41 +1890,73 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
     
     // Get any previous answers to provide context
     const previousAnswers = prioritiesQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
+
+    const lastUserText = _message.content.text ? _message.content.text : lastUserMessage;
     
+    // STEP 1: Determine situation classification
+    const classificationContext = `Analyze the user's message and classify the situation.
+
+        User message: "${lastUserText}"
+        
+        === CLASSIFICATION RULES ===
+        Classify as "Unexpected situation" if the message contains:
+        • Any question or curiosity about something
+        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
+        • Requests for extra details about pricing, services, amenities, locations, or policies
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        
+        Otherwise, classify as "Normal situation".
+        
+        Return ONLY a JSON object:
+        {"status": "Normal situation" or "Unexpected situation"}`;
+    
+    let status = "Normal situation";
+    
+    try {
+        const classificationResponse = await generateText({
+            runtime: _runtime,
+            context: classificationContext,
+            modelClass: ModelClass.SMALL
+        });
+        
+        const classification = JSON.parse(classificationResponse);
+        status = classification.status || "Normal situation";
+        
+        elizaLogger.info(`Situation classified as: ${status}`);
+        
+    } catch (error) {
+        elizaLogger.error("Failed to classify situation:", error);
+        status = "Normal situation"; // Default fallback
+    }
+    
+    // STEP 2: Generate appropriate response based on classification
     const responseContext = `The user ${userName ? `(${userName}) ` : ''}is sharing about their priorities and what's important in choosing a senior living community.
     
-Progress: ${currentAnsweredCount}/2 questions answered so far.
-${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        Progress: ${currentAnsweredCount}/2 questions answered so far.
+        ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
+        User's last message: "${lastUserText}"
+        Situation classification: "${status}"
+        Next question to ask: "${nextQuestion}"
 
-I need to ask next: "${nextQuestion}"
+        === RESPONSE INSTRUCTIONS ===
+        ${status === "Normal situation" ? `
+        1. For "Normal situation":
+        - Stay warm and personal.
+        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
+        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
+        - Keep words under 30-40.
+        ` : `
+        2. For "Unexpected situation":
+        - Look at the last message: "${lastUserText}".
+        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+            If info is missing, search online and give the most accurate answer.
+        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
+        - Keep response within 50–70 words.
+        `}
 
-=== STATUS CLASSIFICATION RULES ===
-Always decide if this is a "Normal situation" or an "Unexpected situation":
-- "Normal situation" → The user simply answers the question, shares basic info about their loved one, or responds calmly without asking for extra info.
-- "Unexpected situation" → The user:
-  • Asks a question or want to know about something (pricing, services, amenities, locations, policies, etc.)
-  • Requests clarification or more details.
-  • Expresses frustration, confusion, or complains ("too many questions", "when does this end?")
-  • Shares an emotional reaction that needs empathy (sadness, worry, humor).
-  • Changes topic or wants to know about something outside the current question.
-
-=== RESPONSE INSTRUCTIONS ===
-1. If status is "Normal situation":
-   - Stay warm and personal.
-   - Naturally use ${userName} and ${lovedOneName} in the reply.
-   - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-
-2. If status is "Unexpected situation":
-   - Look at the last message: "${_message.content.text}".
-   - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-     If info is missing, search online and give the most accurate answer.
-   - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
-   - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
-   - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-   - Keep response within 60–100 words.
-
-Return ONLY a JSON object:
-{"response": "your warm, natural, human-like reply here", "status": "Normal situation" or "Unexpected situation"}`;
+        Return ONLY the response text, no JSON formatting.`;
     
     try {
         const aiResponse = await generateText({
@@ -1711,11 +1965,10 @@ Return ONLY a JSON object:
             modelClass: ModelClass.MEDIUM
         });
         
-        const analysis = safeParseAIResponse(aiResponse);
-        const response = analysis.responseText || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        const status = analysis.status;
+        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
         
-        elizaLogger.info("chris_response", responseContext, aiResponse);
+        elizaLogger.info("chris_response4", responseContext, aiResponse);
+        
         // Set global responseStatus for callback
         setGlobalResponseStatus(status);
         
@@ -1761,7 +2014,7 @@ Return ONLY a JSON object:
 }
 
 // Needs Matching Handler
-async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
+async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string, lastUserMessage: string): Promise<string> {
     // Check if this is a user response (not the initial transition)
     const isUserResponse = _message.content.text && _message.userId !== _message.agentId;
     
@@ -1782,6 +2035,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     const useName = shouldUseName();
     const userName = useName ? await getUserFirstName(_runtime, _message) : "";
     const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    const location = contactInfo?.location || "Florida";
     
     elizaLogger.info(`=== NEEDS MATCHING STAGE ===`);
     elizaLogger.info(`Current user message: ${_message.content.text}`);
@@ -1792,19 +2046,22 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
     // If this is NOT a user response (initial transition), stay in needs_matching and provide the matching response
     if (!isUserResponse) {
         // Combine all previous answers for comprehensive analysis
+        elizaLogger.info("start needs matching")
         const allPreviousAnswers = [
             ...situationQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
             ...lifestyleQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
             ...readinessQAEntries.map(entry => `${entry.question}: ${entry.answer}`),
             ...prioritiesQAEntries.map(entry => `${entry.question}: ${entry.answer}`)
         ].join(" | ");
+
+        const lastUserText = _message.content.text ? _message.content.text : lastUserMessage;
         
         // Generate a response that matches Grand Villa to the user's needs based on their previous answers
         const responseContext = `
             The user ${userName ? `(${userName}) ` : ''} has shared information about their situation and ${lovedOneName}'s needs throughout our discovery process.
 
             All previous answers: "${allPreviousAnswers}"
-            Grand Villa information for reference: "${grandVillaInfo}"
+            User's last message" "${lastUserText}"
             User location: "${location}"
 
             Your task:
@@ -1827,6 +2084,8 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
                 context: responseContext,
                 modelClass: ModelClass.MEDIUM
             });
+
+            elizaLogger.info("chris_needsmatching", responseContext, aiResponse);
             
             const response = aiResponse || `${userName ? `${userName}, ` : ''}Based on everything you've shared about ${lovedOneName}, I can see how Grand Villa would be such a perfect fit. The community, care, and activities we offer align beautifully with what you've described. It sounds like this could really bring ${lovedOneName} the peace and joy you want for them.`;
             
@@ -1886,7 +2145,7 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
         ..._message,
         content: { text: "" }
     };
-            return await handleScheduleVisit(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo);
+            return await handleScheduleVisit(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo, _message.content.text);
 }
 
 // Info Sharing Handler
@@ -2002,276 +2261,91 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
 }
 
 
-// Schedule Visit Handler
-// Schedule Visit Handler (rewritten with booking + email flow)
-async function handleScheduleVisit(
+export async function handleScheduleVisit(
     _runtime: IAgentRuntime,
     _message: Memory,
     _state: State,
-    discoveryState: any,
-    gracePersonality: string,
-    grandVillaInfo: string
+    _discoveryState: any,
+    _gracePersonality: string,
+    _grandVillaInfo: string,
+    _lastUserMessage: string
   ): Promise<string> {
-    elizaLogger.info("Handling schedule visit stage");
+    elizaLogger.info("Handling schedule visit stage (auto 48h EXACT / de-dupe)");
   
-    // 1) First-touch in this stage? Ask the two suggested times.
-    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
-    const hasAskedInitialQuestion =
-      comprehensiveRecord?.visit_scheduling &&
-      comprehensiveRecord.visit_scheduling.some(
-        (e) =>
-          e.question === "Would Wednesday afternoon or Friday morning work better for you?"
-      );
+    // Local TZ fallback without redeclaring DEFAULT_TZ
+    const TZ = ((globalThis as any).DEFAULT_TZ ?? "America/New_York") as string;
   
-    if (!hasAskedInitialQuestion) {
-      const userName = await getUserFirstName(_runtime, _message);
-      const contactInfo = await getContactInfo(_runtime, _message);
-      const lovedOneName = contactInfo?.loved_one_name || "your loved one";
-  
-      // Try to tailor the opener
-      let userLatestText = _message.content?.text || "";
-      if (!userLatestText) {
-        const allMemories = await _runtime.messageManager.getMemories({
-          roomId: _message.roomId,
-          count: 20,
-        });
-        const lastUserMem = allMemories
-          .filter(
-            (mem) =>
-              mem.userId === _message.userId &&
-              mem.content?.source === "direct" &&
-              mem.content?.text
-          )
-          .sort(
-            (a, b) =>
-              new Date(b.createdAt || 0).getTime() -
-              new Date(a.createdAt || 0).getTime()
-          )[0];
-        userLatestText = lastUserMem?.content.text || "";
-        elizaLogger.info(`Fetched last user text (source: direct): ${userLatestText}`);
-      }
-  
-      const responseContext = `
-  Respond warmly to the user's message: "${userLatestText}".
-  1) Reference a specific feature from: ${grandVillaInfo}
-  2) Keep tone empathetic and conversational.
-  3) End with: "Would Wednesday afternoon or Friday morning work better for you?"
-  4) ≤ 80 words.
-  Return ONLY: {"response":"..."}
-  `;
-      let initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? That way, you can really see what daily life would feel like. Would Wednesday afternoon or Friday morning work better for you?`;
-  
-      try {
-        const aiResponse = await generateText({
-          runtime: _runtime,
-          context: responseContext,
-          modelClass: ModelClass.SMALL,
-        });
-        const parsed = JSON.parse(aiResponse);
-        initialResponse = parsed.response || initialResponse;
-      } catch (e) {
-        elizaLogger.error("Failed to generate dynamic initial response:", e);
-      }
-  
-      // Mark that we asked the initial scheduling question
-      await updateComprehensiveRecord(_runtime, _message, {
-        visit_scheduling: [
-          {
-            question:
-              "Would Wednesday afternoon or Friday morning work better for you?",
-            answer: "Asked",
-            timestamp: new Date().toISOString(),
-          },
-        ],
+    // helpers scoped locally to avoid duplicate symbols
+    function iso48hFromNow() {
+      const d = new Date(Date.now() + 48 * 60 * 60 * 1000);
+      d.setSeconds(0, 0);
+      return d.toISOString();
+    }
+    function equalWithinMinutes(aIso: string, bIso: string, minutes = 5) {
+      const diff = Math.abs(new Date(aIso).getTime() - new Date(bIso).getTime());
+      return diff <= minutes * 60 * 1000;
+    }
+    function formatWhenTZ(iso: string, tz = TZ) {
+      return new Date(iso).toLocaleString("en-US", {
+        timeZone: tz,
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
       });
-  
-      await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: { text: initialResponse, metadata: { stage: "schedule_visit" } },
+    }
+    async function findExistingBooking(roomId: string) {
+      // satisfy template-literal UUID type
+      const memories = await _runtime.messageManager.getMemories({
+        roomId: roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: 50,
       });
-  
-      return initialResponse;
+      for (let i = memories.length - 1; i >= 0; i--) {
+        const md = memories[i]?.content?.metadata as any;
+        if (md?.stage === "schedule_visit" && md?.visit_scheduled && md?.eventId && md?.startIso) {
+          return md as { eventId: string; startIso: string; htmlLink?: string; email?: string };
+        }
+      }
+      return null;
     }
   
-    // 2) Follow-up turns
-    if (_message.content.text && _message.userId !== _message.agentId) {
-      const rawText = _message.content.text;
-      const normalized = rawText.replace(/\s+/g, " ").toLowerCase();
+    // Always +48h exactly
+    const startIso = iso48hFromNow();
+    const whenTextFallback = formatWhenTZ(startIso);
   
-      // 2a) Try to detect a time selection from this message
-      let selectedTime: string | null = null;
-      if (
-        (normalized.includes("wednesday") || normalized.includes("wed")) &&
-        (normalized.includes("afternoon") ||
-          normalized.includes("pm") ||
-          normalized.includes("2pm") ||
-          normalized.includes("3pm") ||
-          normalized.includes("4pm"))
-      ) {
-        selectedTime = "Wednesday afternoon";
-      } else if (
-        (normalized.includes("friday") || normalized.includes("fri")) &&
-        (normalized.includes("morning") ||
-          normalized.includes("am") ||
-          normalized.includes("9am") ||
-          normalized.includes("10am") ||
-          normalized.includes("11am"))
-      ) {
-        selectedTime = "Friday morning";
+    // Find email (current message ➜ visit_info ➜ comprehensive record)
+    const userText = (_message.content?.text || _lastUserMessage || "").trim();
+    let finalEmail: string | null = null;
+    try {
+      finalEmail =
+        userText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || null;
+  
+      if (!finalEmail) {
+        const visitInfo = await getVisitInfo(_runtime, _message);
+        if (visitInfo?.email) finalEmail = visitInfo.email;
       }
-  
-      // 2b) Also try to pick up an email in this very message (quick regex)
-      const emailMatch = rawText.match(
-        /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i
-      );
-      if (emailMatch?.[0]) {
-        const partialVisitInfo = {
-          email: emailMatch[0],
-          collectedAt: new Date().toISOString(),
-        };
-        await saveUserResponse(
-          _runtime,
-          _message,
-          "visit_info",
-          JSON.stringify(partialVisitInfo)
-        );
-        elizaLogger.info(`Captured email inline: ${emailMatch[0]}`);
+      if (!finalEmail) {
+        const rec = await getComprehensiveRecord(_runtime, _message);
+        const allAnswers = [
+          ...(rec?.visit_scheduling ?? []).map((e) => e.answer),
+          userText,
+        ].join(" ");
+        finalEmail =
+          allAnswers.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || null;
       }
+    } catch (e) {
+      elizaLogger.warn("Email extraction failed; continuing without email", e);
+    }
   
-      // 2c) If no time in this message, see if we stored one previously
-      const latestRecord = await getComprehensiveRecord(_runtime, _message);
-      const visitEntries = latestRecord?.visit_scheduling || [];
-      let storedSelected: string | undefined;
-      for (let i = visitEntries.length - 1; i >= 0; i--) {
-        const q = visitEntries[i].question;
-        if (q === "Selected time" || q === "What time would work best for your visit?") {
-          storedSelected = visitEntries[i].answer;
-          if (storedSelected) break;
-        }
-      }
-      const effectiveSelected = selectedTime || storedSelected || null;
+    // Idempotency: reuse if we already booked this exact slot
+    const existing = await findExistingBooking(_message.roomId);
+    if (existing?.startIso && equalWithinMinutes(existing.startIso, startIso, 5)) {
+      const confirmation =
+        `Great news your tour with Diana is booked!!! I’ve scheduled your tour for ${formatWhenTZ(existing.startIso)} ` +
+        `and sent a calendar invite to ${existing.email ?? finalEmail ?? "your email"}. ` +
+        `We can't wait to meet you.`;
   
-      // 2d) See if we already have an email saved (or from the regex above)
-      const visitInfo = await getVisitInfo(_runtime, _message);
-      const userEmail = visitInfo?.email || emailMatch?.[0] || null;
-  
-      elizaLogger.info(`=== VISIT TIMING CHECK ===`);
-      elizaLogger.info(`User text: ${rawText}`);
-      elizaLogger.info(`Selected this turn: ${selectedTime || "NO"}`);
-      elizaLogger.info(`Stored selected: ${storedSelected || "NO"}`);
-      elizaLogger.info(`Effective selected: ${effectiveSelected || "NO"}`);
-      elizaLogger.info(`Email on file: ${userEmail || "NO"}`);
-      elizaLogger.info(`=========================`);
-  
-      // 2e) If we still don't have a time, ask for a time (keep it warm)
-      if (!effectiveSelected) {
-        const userName = await getUserFirstName(_runtime, _message);
-        const flexibleContext = `The user ${
-          userName ? `(${userName}) ` : ""
-        }didn't pick the suggested times. Their message: "${rawText}"
-  Generate a warm, understanding reply that:
-  1) acknowledges their message,
-  2) asks what time works best for them,
-  3) shows flexibility,
-  <= 50 words.
-  Return ONLY text.`;
-  
-        let askTime =
-          `${userName ? `${userName}, ` : ""}I can work around your schedule—` +
-          `what time works best for you to visit?`;
-  
-        try {
-          const ai = await generateText({
-            runtime: _runtime,
-            context: flexibleContext,
-            modelClass: ModelClass.SMALL,
-          });
-          askTime = ai || askTime;
-        } catch (e) {
-          elizaLogger.error("Failed to generate flexible time ask:", e);
-        }
-  
-        await _runtime.messageManager.createMemory({
-          roomId: _message.roomId,
-          userId: _message.userId,
-          agentId: _message.agentId,
-          content: { text: askTime, metadata: { stage: "schedule_visit" } },
-        });
-        return askTime;
-      }
-  
-      // 2f) If we have a time but no email yet → store time and ask for email
-      if (!userEmail) {
-        await updateComprehensiveRecord(_runtime, _message, {
-          visit_scheduling: [
-            {
-              question: "Selected time",
-              answer: effectiveSelected,
-              timestamp: new Date().toISOString(),
-            },
-          ],
-        });
-  
-        const askEmail = `Great — ${effectiveSelected} works. What email should I send the calendar invite to?`;
-        await _runtime.messageManager.createMemory({
-          roomId: _message.roomId,
-          userId: _message.userId,
-          agentId: _message.agentId,
-          content: { text: askEmail, metadata: { stage: "schedule_visit" } },
-        });
-        return askEmail;
-      }
-  
-      // 2g) We have both → try to book via scheduler
-      const booked = await scheduleWithCalendar({
-        email: userEmail,
-        label: effectiveSelected, // natural-language label parsed by scheduler
-        roomId: _message.roomId,
-        agentId: _message.agentId,
-        summary: "Grand Villa Tour",
-        location: "Grand Villa of Clearwater",
-      });
-  
-      if (!booked.ok) {
-        if (booked.error === "time_conflict") {
-          const tryAgain =
-            "Looks like that time just filled. Want to try Wednesday 3pm or Friday 10am?";
-          await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: { text: tryAgain, metadata: { stage: "schedule_visit" } },
-          });
-          return tryAgain;
-        }
-        if (booked.error === "duplicate") {
-          const dup =
-            "It looks like we already booked that slot. Do you want to keep it or pick another time?";
-          await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: {
-              text: dup,
-              metadata: { stage: "schedule_visit", visit_scheduled: true },
-            },
-          });
-          return dup;
-        }
-        const generic = `I hit a snag booking that (${booked.error}). Would another time work?`;
-        await _runtime.messageManager.createMemory({
-          roomId: _message.roomId,
-          userId: _message.userId,
-          agentId: _message.agentId,
-          content: { text: generic, metadata: { stage: "schedule_visit" } },
-        });
-        return generic;
-      }
-  
-      // 2h) Success 🎉
-      const confirmation = `All set! I booked ${booked.whenText} and sent a calendar invite to ${userEmail}.`;
       await _runtime.messageManager.createMemory({
         roomId: _message.roomId,
         userId: _message.userId,
@@ -2281,34 +2355,90 @@ async function handleScheduleVisit(
           metadata: {
             stage: "schedule_visit",
             visit_scheduled: true,
-            eventId: booked.eventId,
-            startIso: booked.startIso,
-            htmlLink: booked.htmlLink,
+            eventId: existing.eventId,
+            startIso: existing.startIso,
+            htmlLink: existing.htmlLink,
+            email: existing.email ?? finalEmail ?? null,
           },
         },
       });
+  
+      setGlobalResponseStatus("Normal situation");
       return confirmation;
     }
   
-    // 3) Safety fallback (no user text present)
-    const userName = await getUserFirstName(_runtime, _message);
-    const contactInfo = await getContactInfo(_runtime, _message);
-    const lovedOneName = contactInfo?.loved_one_name || "your loved one";
+    // Book if we have an email; otherwise ask only for email
+    if (finalEmail) {
+      const booked: BookingResult = await scheduleWithCalendar({
+        email: finalEmail,
+        startIso,
+        roomId: _message.roomId,
+        agentId: _message.agentId,
+        summary: "Grand Villa Tour",
+        location: "Grand Villa of Clearwater",
+      });
   
-    const initialResponse = `It sounds like ${lovedOneName} could really thrive here, and I'd love for you to experience it firsthand. Why don't we set up a time for you to visit, tour the community, and even enjoy a meal with us? Would Wednesday afternoon or Friday morning work better for you?`;
+      if (booked.ok) {
+        const confirmation =
+          `Great news your tour with Diana is booked!!! I’ve scheduled your tour for ${booked.whenText || whenTextFallback} ` +
+          `and sent a calendar invite to ${finalEmail}. We are very excited to meet you.`;
+  
+        await _runtime.messageManager.createMemory({
+          roomId: _message.roomId,
+          userId: _message.userId,
+          agentId: _message.agentId,
+          content: {
+            text: confirmation,
+            metadata: {
+              stage: "schedule_visit",
+              visit_scheduled: true,
+              eventId: booked.eventId,
+              startIso: booked.startIso || startIso,
+              htmlLink: booked.htmlLink,
+              email: finalEmail,
+            },
+          },
+        });
+  
+        setGlobalResponseStatus("Normal situation");
+        return confirmation;
+      }
+  
+      // Non-ok booking → keep the same 48h plan and soft-confirm
+      const softConfirm =
+        `Upon reaching the property ask for Diana. ${whenTextFallback}. ` +
+        `I’ll send the calendar invite to ${finalEmail}. If you have any issues please reachout at (727)-286-3999`;
+  
+      await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+          text: softConfirm,
+          metadata: { stage: "schedule_visit", proposedStartIso: startIso, email: finalEmail },
+        },
+      });
+  
+      setGlobalResponseStatus("Normal situation");
+      return softConfirm;
+    }
+  
+    const askEmail =
+      `Great news Diana can show you around Grand Villas on ${whenTextFallback}. ` +
+      `What’s the best email to send your calendar invite to? We can't wait to meet you!!!! `;
   
     await _runtime.messageManager.createMemory({
       roomId: _message.roomId,
       userId: _message.userId,
       agentId: _message.agentId,
-      content: { text: initialResponse, metadata: { stage: "schedule_visit" } },
+      content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: startIso } },
     });
   
-    return initialResponse;
+    setGlobalResponseStatus("Normal situation");
+    return askEmail;
   }
   
-
-  async function handleAdditionalInfo(
+  export async function handleAdditionalInfo(
     _runtime: IAgentRuntime,
     _message: Memory,
     _state: State,
@@ -2332,7 +2462,7 @@ async function handleScheduleVisit(
           "Stage-based approach returned empty, using fallback to get current user's recent messages"
         );
         const allMemories = await _runtime.messageManager.getMemories({
-          roomId: _message.roomId,
+          roomId: _message.roomId as `${string}-${string}-${string}-${string}-${string}`,
           count: 20,
         });
   
@@ -2400,28 +2530,20 @@ async function handleScheduleVisit(
           existingVisitInfo?.preferredContact ||
           null;
   
-        const priorHeard = (existingVisitInfo as any)?.heardAboutUs || null; // cast to avoid TS complaints if type isn't updated yet
+        const priorHeard = (existingVisitInfo as any)?.heardAboutUs || null;
         const finalHeardAbout =
           (parsed.foundHeard && parsed.heardAboutUs) || priorHeard || null;
   
         elizaLogger.info("=== VISIT INFO EXTRACTION ===");
         elizaLogger.info(
-          `Extracted -> email:${parsed.email ?? "null"} | address:${
-            parsed.mailingAddress ?? "null"
-          } | pref:${parsed.preferredContact ?? "null"} | heard:${
-            parsed.heardAboutUs ?? "null"
-          }`
+          `Extracted -> email:${parsed.email ?? "null"} | address:${parsed.mailingAddress ?? "null"} | pref:${parsed.preferredContact ?? "null"} | heard:${parsed.heardAboutUs ?? "null"}`
         );
         elizaLogger.info(
-          `Final -> email:${finalEmail ?? "null"} | address:${
-            finalAddress ?? "null"
-          } | pref:${finalPreference ?? "null"} | heard:${
-            finalHeardAbout ?? "null"
-          }`
+          `Final -> email:${finalEmail ?? "null"} | address:${finalAddress ?? "null"} | pref:${finalPreference ?? "null"} | heard:${finalHeardAbout ?? "null"}`
         );
         elizaLogger.info("=============================");
   
-        // 4) If we have any new info, save it (overwrite with most complete snapshot)
+        // 4) Save snapshot if we have anything new
         if (finalEmail || finalAddress || finalPreference || finalHeardAbout) {
           const snapshot = {
             email: finalEmail,
@@ -2431,36 +2553,25 @@ async function handleScheduleVisit(
             collectedAt: new Date().toISOString(),
           };
   
-          await saveUserResponse(
-            _runtime,
-            _message,
-            "visit_info",
-            JSON.stringify(snapshot)
-          );
+          await saveUserResponse(_runtime, _message, "visit_info", JSON.stringify(snapshot));
           elizaLogger.info(`Saved visit_info snapshot: ${JSON.stringify(snapshot)}`);
   
-          // Also reflect in a user status line (useful for ops logs)
-          const statusUpdate = `Visit info → email:${
-            finalEmail ?? "—"
-          }, address:${finalAddress ?? "—"}, preferred:${
-            finalPreference ?? "—"
-          }, heard:${finalHeardAbout ?? "—"}`;
+          const statusUpdate = `Visit info → email:${finalEmail ?? "—"}, address:${finalAddress ?? "—"}, preferred:${finalPreference ?? "—"}, heard:${finalHeardAbout ?? "—"}`;
           await updateUserStatus(_runtime, _message, statusUpdate);
         }
   
-        // 5) Decide what we still need and ask just for that
+        // 5) Ask only for missing bits
         const missing: string[] = [];
         if (!finalEmail) missing.push("email address");
         if (!finalAddress) missing.push("mailing address");
         if (!finalPreference) missing.push("preferred contact method");
         if (!finalHeardAbout) missing.push("how you heard about us");
   
-        // If nothing is missing, close the loop warmly
         if (missing.length === 0) {
           const userName = await getUserFirstName(_runtime, _message);
-          const response = `Perfect${userName ? `, ${userName}` : ""}! I’ve got your details noted. I’ll send confirmation and directions to your ${
+          const response = `Perfect${userName ? `, ${userName}` : ""}! I've got your details noted. I'll send confirmation and directions to your ${
             finalPreference === "email" ? "email" : "phone"
-          }. Thanks for sharing how you heard about us—that really helps. We’re excited to welcome you for your visit!`;
+          }. Thanks for sharing how you heard about us—that really helps. We're excited to welcome you for your visit!`;
   
           await _runtime.messageManager.createMemory({
             roomId: _message.roomId,
@@ -2468,7 +2579,6 @@ async function handleScheduleVisit(
             agentId: _message.agentId,
             content: {
               text: response,
-              // Keep stage as schedule_visit (booking may still happen separately)
               metadata: { stage: "schedule_visit", visit_info_complete: true },
             },
           });
@@ -2476,18 +2586,13 @@ async function handleScheduleVisit(
           return response;
         }
   
-        // We still need something → ask *only* for the missing bits
         let ask: string;
         if (missing.length === 1) {
           ask = `Almost there! I just need your ${missing[0]} to finish setting up your visit.`;
         } else if (missing.length === 2) {
-          ask = `Great! I just need your ${missing.join(
-            " and "
-          )} to complete the scheduling.`;
+          ask = `Great! I just need your ${missing.join(" and ")} to complete the scheduling.`;
         } else {
-          ask = `Perfect! To complete your visit scheduling, I’ll need your ${missing
-            .slice(0, -1)
-            .join(", ")} and ${missing.slice(-1)}.`;
+          ask = `Perfect! To complete your visit scheduling, I'll need your ${missing.slice(0, -1).join(", ")} and ${missing.slice(-1)}.`;
         }
   
         await _runtime.messageManager.createMemory({
@@ -2501,7 +2606,7 @@ async function handleScheduleVisit(
       } catch (error) {
         elizaLogger.error("Error extracting visit info:", error);
         const fallback =
-          "Perfect! To complete your visit scheduling, I’ll need your email address, mailing address, your preferred contact method (phone or email), and how you heard about us.";
+          "Perfect! To complete your visit scheduling, I'll need your email address, mailing address, your preferred contact method (phone or email), and how you heard about us.";
         await _runtime.messageManager.createMemory({
           roomId: _message.roomId,
           userId: _message.userId,
@@ -2515,7 +2620,7 @@ async function handleScheduleVisit(
     // First touch in this stage (no user text yet)
     const userName = await getUserFirstName(_runtime, _message);
     const initial =
-      `That's wonderful${userName ? `, ${userName}` : ""}! Let’s get your visit scheduled so you can experience it firsthand. ` +
+      `That's wonderful${userName ? `, ${userName}` : ""}! Let's get your visit scheduled so you can experience it firsthand. ` +
       `Could you share your email address, mailing address, your preferred contact method (phone or email), and how you heard about us?`;
   
     await _runtime.messageManager.createMemory({

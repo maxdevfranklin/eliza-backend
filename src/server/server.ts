@@ -34,10 +34,8 @@ const oauth2 = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID!,
   process.env.GOOGLE_CLIENT_SECRET!
 );
-
 oauth2.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN! });
 
-// Force the concrete calendar_v3.Calendar type so overloads resolve correctly
 const calendar: calendar_v3.Calendar = google.calendar({
   version: 'v3',
   auth: oauth2,
@@ -49,11 +47,12 @@ const calendar: calendar_v3.Calendar = google.calendar({
 const ScheduleRequestSchema = z
   .object({
     email: z.string().email(),
-    label: z.string().optional(), // e.g. "Thursday 5 pm"
-    startIso: z.string().datetime().optional(), // if provided, label can be omitted
-    durationMin: z.number().int().min(15).max(240).optional().default(60),
+    label: z.string().optional(),
+    startIso: z.string().datetime().optional(),
+    durationMin: z.number().int().min(15).max(240).optional().default(1),
     tz: z.string().optional().default(DEFAULT_TZ),
     createMeet: z.boolean().optional().default(true),
+    allowOverbook: z.boolean().optional().default(true),
     roomId: z.string().optional(),
     agentId: z.string().optional(),
     externalKey: z.string().optional(),
@@ -63,11 +62,40 @@ const ScheduleRequestSchema = z
       .string()
       .optional()
       .default(
-        'Thank you for scheduling a visit to Grand Villa. This invite includes time, location, and directions.'
+        'Thank you for scheduling a visit to Grand Villa. This invite includes time, location, and directions. Diana will be waiting to welcome you.'
       ),
   })
   .refine((d) => d.label || d.startIso, {
     message: 'Either "label" or "startIso" must be provided',
+  });
+
+const RescheduleRequestSchema = z
+  .object({
+    eventId: z.string().optional(),
+    email: z.string().email().optional(),
+    label: z.string().optional(),
+    startIso: z.string().datetime().optional(),
+    durationMin: z.number().int().min(15).max(240).optional().default(1),
+    tz: z.string().optional().default(DEFAULT_TZ),
+    createMeet: z.boolean().optional().default(true),
+    allowOverbook: z.boolean().optional().default(true),
+    roomId: z.string().optional(),
+    agentId: z.string().optional(),
+    externalKey: z.string().optional(),
+    summary: z.string().optional().default('Grand Villa Tour'),
+    location: z.string().optional().default('Grand Villa of Clearwater'),
+    description: z
+      .string()
+      .optional()
+      .default(
+        'Thank you for rescheduling your visit to Grand Villa. This invite includes time, location, and directions. Diana will be waiting to welcome you.'
+      ),
+  })
+  .refine((d) => d.label || d.startIso, {
+    message: 'Either "label" or "startIso" must be provided',
+  })
+  .refine((d) => !!(d.eventId || d.email), {
+    message: 'Either "eventId" or "email" must be provided to locate the existing event',
   });
 
 /* =========================
@@ -98,20 +126,8 @@ function parseLabelFallback(label: string, tz: string): DateTime | undefined {
   if (!m) return undefined;
 
   const map: Record<string, number> = {
-    sun: 7,
-    mon: 1,
-    tue: 2,
-    wed: 3,
-    thu: 4,
-    fri: 5,
-    sat: 6,
-    sunday: 7,
-    monday: 1,
-    tuesday: 2,
-    wednesday: 3,
-    thursday: 4,
-    friday: 5,
-    saturday: 6,
+    sun: 7, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
+    sunday: 7, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
   };
   const targetDow = map[m[0].toLowerCase()];
   if (!targetDow) return undefined;
@@ -127,13 +143,12 @@ function parseLabelFallback(label: string, tz: string): DateTime | undefined {
     const ap = t[3]?.toUpperCase();
     if (ap === 'PM' && h !== 12) h += 12;
     if (ap === 'AM' && h === 12) h = 0;
-    hour = h;
-    minute = mm;
+    hour = h; minute = mm;
   }
 
   const now = DateTime.now().setZone(tz);
   let dt = now.set({ hour, minute, second: 0, millisecond: 0 });
-  let delta = targetDow - now.weekday; // 1..7 (Mon..Sun)
+  let delta = targetDow - now.weekday; // 1..7
   if (delta < 0) delta += 7;
   if (delta === 0 && dt <= now) delta = 7;
   dt = dt.plus({ days: delta });
@@ -151,12 +166,31 @@ function buildEventTimes(start: DateTime, durationMin: number) {
   };
 }
 
+async function findExistingEventByEmail(email: string): Promise<calendar_v3.Schema$Event | undefined> {
+  // Look ahead ~60 days for an event with this attendee (light filter by summary)
+  const now = new Date().toISOString();
+  const max = DateTime.now().plus({ days: 60 }).toISO();
+  const list = await calendar.events.list({
+    calendarId: CALENDAR_ID,
+    timeMin: now,
+    timeMax: max ?? undefined,
+    singleEvents: true,
+    maxResults: 50,
+    orderBy: 'startTime',
+    q: 'Grand Villa Tour', // helps narrow but not required
+  });
+
+  const items = list.data.items ?? [];
+  return items.find(ev =>
+    (ev.attendees ?? []).some(a => a.email?.toLowerCase() === email.toLowerCase())
+  );
+}
+
 /* =========================
   Server
 ========================= */
 const app = Fastify({ logger: true });
 
-// CORS so your frontend can call this server
 await app.register(cors, {
   origin: true,
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -166,6 +200,9 @@ app.get('/health', async (_req, reply) => {
   reply.send({ ok: true, tz: DEFAULT_TZ, calendarId: CALENDAR_ID });
 });
 
+/**
+ * POST /schedule  — create new event
+ */
 app.post('/schedule', async (req, reply) => {
   const parsed = ScheduleRequestSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -173,47 +210,34 @@ app.post('/schedule', async (req, reply) => {
   }
 
   const {
-    email,
-    label,
-    startIso,
-    durationMin,
-    tz,
-    createMeet,
-    roomId,
-    agentId,
-    externalKey,
-    summary,
-    location,
-    description,
+    email, label, startIso, durationMin, tz, createMeet,
+    allowOverbook, roomId, agentId, externalKey,
+    summary, location, description,
   } = parsed.data;
 
   try {
-    // 1) Resolve start time in target tz
+    // 1) Resolve start time
     let startDt: DateTime | undefined;
-    if (startIso) {
-      startDt = DateTime.fromISO(startIso, { setZone: true }).setZone(tz);
-    } else if (label) {
-      startDt = parseWithChrono(label, tz) ?? parseLabelFallback(label, tz);
-    }
+    if (startIso) startDt = DateTime.fromISO(startIso, { setZone: true }).setZone(tz);
+    else if (label) startDt = parseWithChrono(label, tz) ?? parseLabelFallback(label, tz);
     if (!startDt || !startDt.isValid) {
       return reply.status(400).send({ ok: false, error: 'Could not parse date/time' });
     }
 
     const { startDateTime, endDateTime, end } = buildEventTimes(startDt, durationMin);
 
-    // 2) Idempotency via extendedProperties.private
+    // 2) Idempotency — include email so same person can't double-book same slot,
+    // but different people (overbook) will get a different key.
     const idempKey =
-      externalKey ?? `${roomId ?? ''}|${agentId ?? ''}|${startDateTime}|${tz}`;
+      externalKey ?? `${roomId ?? ''}|${agentId ?? ''}|${email}|${startDateTime}|${tz}`;
 
     if (idempKey) {
-      const params: calendar_v3.Params$Resource$Events$List = {
+      const dup = await calendar.events.list({
         calendarId: CALENDAR_ID,
-        privateExtendedProperty: [`externalKey=${idempKey}`], // MUST be an array
+        privateExtendedProperty: [`externalKey=${idempKey}`],
         maxResults: 1,
         singleEvents: true,
-      };
-
-      const dup = await calendar.events.list(params);
+      });
       if (dup.data.items?.length) {
         req.log.warn({ idempKey }, 'Duplicate scheduling prevented');
         return reply.status(409).send({
@@ -225,52 +249,47 @@ app.post('/schedule', async (req, reply) => {
       }
     }
 
-    // 3) Conflict check — prefer freebusy, fallback to events.list if scope insufficient
-    let hasConflict = false;
-    try {
-      const fb = await calendar.freebusy.query({
-        requestBody: {
+    // 3) Conflict check (skip if allowOverbook)
+    if (!allowOverbook) {
+      let hasConflict = false;
+      try {
+        const fb = await calendar.freebusy.query({
+          requestBody: {
+            timeMin: startDt.toUTC().toISO(),
+            timeMax: end.toUTC().toISO(),
+            items: [{ id: CALENDAR_ID }],
+          },
+        });
+        const busy = fb.data.calendars?.[CALENDAR_ID]?.busy ?? [];
+        hasConflict = busy.length > 0;
+      } catch (e: any) {
+        const msg = e?.response?.data || e?.message || e;
+        req.log.warn({ err: msg }, 'freebusy.query failed — falling back to events.list');
+        const list = await calendar.events.list({
+          calendarId: CALENDAR_ID,
           timeMin: startDt.toUTC().toISO(),
           timeMax: end.toUTC().toISO(),
-          items: [{ id: CALENDAR_ID }],
-        },
-      });
-      const busy = fb.data.calendars?.[CALENDAR_ID]?.busy ?? [];
-      hasConflict = busy.length > 0;
-    } catch (e: any) {
-      const msg = e?.response?.data || e?.message || e;
-      req.log.warn({ err: msg }, 'freebusy.query failed — falling back to events.list');
-
-      const params: calendar_v3.Params$Resource$Events$List = {
-        calendarId: CALENDAR_ID,
-        timeMin: startDt.toUTC().toISO(),
-        timeMax: end.toUTC().toISO(),
-        singleEvents: true,
-        orderBy: 'startTime',
-        maxResults: 1,
-      };
-      const list = await calendar.events.list(params);
-      hasConflict = (list.data.items?.length ?? 0) > 0;
+          singleEvents: true,
+          orderBy: 'startTime',
+          maxResults: 1,
+        });
+        hasConflict = (list.data.items?.length ?? 0) > 0;
+      }
+      if (hasConflict) return reply.status(409).send({ ok: false, error: 'time_conflict' });
+    } else {
+      req.log.info({ allowOverbook, start: startDateTime, tz }, 'Overbooking enabled — skipping conflict check');
     }
 
-    if (hasConflict) {
-      return reply.status(409).send({ ok: false, error: 'time_conflict' });
-    }
-
-    // 4) Create event (Google emails invite because of sendUpdates: 'all')
+    // 4) Create event
     const requestBody: calendar_v3.Schema$Event = {
-      summary,
-      description,
-      location,
+      summary, description, location,
       start: { dateTime: startDateTime, timeZone: tz },
       end: { dateTime: endDateTime, timeZone: tz },
       attendees: [{ email }],
       guestsCanSeeOtherGuests: false,
       guestsCanInviteOthers: false,
       reminders: { useDefault: true },
-      extendedProperties: {
-        private: idempKey ? { externalKey: idempKey } : undefined,
-      },
+      extendedProperties: { private: idempKey ? { externalKey: idempKey } : undefined },
       conferenceData: createMeet
         ? {
             createRequest: {
@@ -302,6 +321,102 @@ app.post('/schedule', async (req, reply) => {
   } catch (err: any) {
     const e = err?.response?.data ?? err?.message ?? err;
     req.log.error({ err: e }, 'Scheduling failed');
+    return reply.status(500).send({ ok: false, error: e });
+  }
+});
+
+/**
+ * POST /reschedule — book the new slot, then cancel the previous one
+ * Safe order: try to create the new event first (with overbook allowed by default),
+ * then delete the old event if creation succeeded.
+ */
+app.post('/reschedule', async (req, reply) => {
+  const parsed = RescheduleRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return reply.status(400).send({ ok: false, error: parsed.error.flatten() });
+  }
+
+  const {
+    eventId, email, label, startIso, durationMin, tz, createMeet,
+    allowOverbook, roomId, agentId, externalKey, summary, location, description,
+  } = parsed.data;
+
+  try {
+    // Find the existing event if eventId not provided
+    let existingEventId = eventId;
+    if (!existingEventId && email) {
+      const found = await findExistingEventByEmail(email);
+      existingEventId = found?.id;
+    }
+    if (!existingEventId) {
+      return reply.status(404).send({ ok: false, error: 'existing_event_not_found' });
+    }
+
+    // Resolve new start time
+    let startDt: DateTime | undefined;
+    if (startIso) startDt = DateTime.fromISO(startIso, { setZone: true }).setZone(tz);
+    else if (label) startDt = parseWithChrono(label, tz) ?? parseLabelFallback(label, tz);
+    if (!startDt || !startDt.isValid) {
+      return reply.status(400).send({ ok: false, error: 'Could not parse new date/time' });
+    }
+
+    const { startDateTime, endDateTime } = buildEventTimes(startDt, durationMin);
+
+    // Build idempotency for new slot
+    const newKey =
+      externalKey ?? `${roomId ?? ''}|${agentId ?? ''}|${email ?? ''}|${startDateTime}|${tz}`;
+
+    // Create the new event first (with overbook allowed by default for reschedules)
+    const newEvent = await calendar.events.insert({
+      calendarId: CALENDAR_ID,
+      requestBody: {
+        summary,
+        description,
+        location,
+        start: { dateTime: startDateTime, timeZone: tz },
+        end: { dateTime: endDateTime, timeZone: tz },
+        attendees: email ? [{ email }] : [],
+        guestsCanSeeOtherGuests: false,
+        guestsCanInviteOthers: false,
+        reminders: { useDefault: true },
+        extendedProperties: { private: newKey ? { externalKey: newKey } : undefined },
+        conferenceData: createMeet
+          ? {
+              createRequest: {
+                requestId: uuidv4(),
+                conferenceSolutionKey: { type: 'hangoutsMeet' },
+              },
+            }
+          : undefined,
+      },
+      sendUpdates: 'all',
+      conferenceDataVersion: createMeet ? 1 : 0,
+    });
+
+    // Now cancel the previous event (send cancellation emails)
+    await calendar.events.delete({
+      calendarId: CALENDAR_ID,
+      eventId: existingEventId,
+      sendUpdates: 'all',
+    });
+
+    const whenText = formatWhenText(startDt);
+    const link = newEvent.data.htmlLink ?? '';
+    req.log.info(
+      { oldEventId: existingEventId, newEventId: newEvent.data.id, whenText },
+      'Reschedule complete (booked new, canceled old)'
+    );
+
+    return reply.send({
+      ok: true,
+      eventId: newEvent.data.id,
+      htmlLink: link,
+      whenText,
+      startIso: startDt.toISO(),
+    });
+  } catch (err: any) {
+    const e = err?.response?.data ?? err?.message ?? err;
+    req.log.error({ err: e }, 'Reschedule failed');
     return reply.status(500).send({ ok: false, error: e });
   }
 });
