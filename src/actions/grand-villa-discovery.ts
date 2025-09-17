@@ -1098,6 +1098,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
         • Requests for extra details about pricing, services, amenities, locations, or policies
         • Expressions of frustration, confusion, or complaints ("too many questions", "when can I get information?")
+        • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
         
         Otherwise, classify as "Normal situation".
         
@@ -1144,7 +1145,12 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         - Look at the last message: "${_message.content.text}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
-        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
+        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
+        - If it's a pricing question:
+            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
+            • Add that pricing depends on the level of care and services chosen.  
+            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
         - Keep response within 50–70 words.
@@ -1322,6 +1328,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
         • Requests for extra details about pricing, services, amenities, locations, or policies
         • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
         
         Otherwise, classify as "Normal situation".
         
@@ -1368,7 +1375,12 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
-        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
+        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
+        - If it's a pricing question:
+            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
+            • Add that pricing depends on the level of care and services chosen.  
+            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
         - Keep response within 50–70 words.
@@ -1556,6 +1568,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
         • Requests for extra details about pricing, services, amenities, locations, or policies
         • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
         
         Otherwise, classify as "Normal situation".
         
@@ -1602,7 +1615,12 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
-        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
+        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
+        - If it's a pricing question:
+            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
+            • Add that pricing depends on the level of care and services chosen.  
+            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
         - Keep response within 50–70 words.
@@ -1789,6 +1807,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
         • Requests for extra details about pricing, services, amenities, locations, or policies
         • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
         
         Otherwise, classify as "Normal situation".
         
@@ -1835,7 +1854,12 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
-        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
+        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
+        - If it's a pricing question:
+            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
+            • Add that pricing depends on the level of care and services chosen.  
+            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
         - Keep response within 50–70 words.
@@ -2347,6 +2371,7 @@ async function handleScheduleVisit(
         • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
         • Requests for extra details about pricing, services, amenities, locations, or policies
         • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
         
         Otherwise, classify as "Normal situation".
         
@@ -2393,7 +2418,12 @@ async function handleScheduleVisit(
         - Look at the last message: "${lastUserText}".
         - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
             If info is missing, search online and give the most accurate answer.
-        - For pricing questions, use grandvilla_information to find the closest Grand Villa to "${location}" and share its exact name and pricing (do not invent a new one).
+        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
+        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
+        - If it's a pricing question:
+            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
+            • Add that pricing depends on the level of care and services chosen.  
+            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
         - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
         - Keep response within 50–70 words.
