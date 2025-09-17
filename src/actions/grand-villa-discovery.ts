@@ -208,34 +208,132 @@ const rawScheduler =
   process.env.SCHEDULER_URL ||
   'https://eliza-scheduler-production.up.railway.app/';
 
+  type BookingOk = {
+    ok: true;
+    eventId: string;
+    htmlLink: string;
+    startIso: string;
+    whenText: string;
+  };
+  type BookingErr = { ok: false; error: string };
+  type BookingResult = BookingOk | BookingErr;
+
 const SCHEDULE_BASE = rawScheduler.replace(/\/+$/, ''); // strip trailing slashes
 const SCHEDULE_URL = `${SCHEDULE_BASE}/schedule`;
 const DEFAULT_TZ = process.env.TZ || 'America/New_York';
 elizaLogger.info("chris_schedule_param", SCHEDULE_BASE, SCHEDULE_URL, DEFAULT_TZ)
 
-type BookingResult = {
-  ok: boolean;
-  eventId?: string;
-  htmlLink?: string;
-  whenText?: string;
-  startIso?: string;
-  error?: string;
-};
-
-async function scheduleWithCalendar(args: {
-  email: string;
-  label?: string;        // e.g., "Wednesday afternoon" or "Fri 10am"
-  startIso?: string;
-  tz?: string;
-  roomId: string;
-  agentId: string;
-  summary?: string;
-  location?: string;
-}): Promise<BookingResult> {
-  const res = await fetch(SCHEDULE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+const DAY_ALIASES: Record<string, number> = {
+    sun: 0, sunday: 0,
+    mon: 1, monday: 1,
+    tue: 2, tues: 2, tuesday: 2,
+    wed: 3, weds: 3, wednesday: 3,
+    thu: 4, thur: 4, thurs: 4, thursday: 4,
+    fri: 5, friday: 5,
+    sat: 6, saturday: 6,
+  };
+  function pad(n: number) { return `${n}`.padStart(2, "0"); }
+  function toLocalISO(year: number, month: number, day: number, hh = 14, mm = 0, tz = DEFAULT_TZ) {
+    // Build local time then convert to ISO
+    const dt = new Date(
+      // create as if UTC, then adjust by timezone offset via Intl is overkill; we use fixed local -> ISO assumption:
+      // safer: use Date with local, then toISOString after setting local components
+      // but JS Date lacks tz; we rely on server TZ == DEFAULT_TZ or your scheduler does tz normalization.
+      // If your scheduler expects local wall time + tz string, it's fine to send {startIso, tz}.
+      Date.UTC(year, month - 1, day, hh, mm, 0, 0)
+    );
+    return dt.toISOString();
+  }
+  
+  /** Map vague parts of day to a canonical hour */
+  function partOfDayToHour(s: string): number {
+    const t = s.toLowerCase();
+    if (t.includes("morning")) return 10;     // 10:00
+    if (t.includes("noon") || t.includes("midday")) return 12;
+    if (t.includes("afternoon")) return 14;   // 2pm
+    if (t.includes("evening")) return 17;     // 5pm
+    if (t.includes("night")) return 18;       // 6pm
+    return 14; // default afternoon
+  }
+  
+  /**
+   * Very small parser for labels like:
+   *   "Wednesday afternoon", "Fri 10am", "tue 1:30 pm", "Friday"
+   * Returns a start ISO for the *next* occurrence of that day/time.
+   */
+  function resolveStartFromLabel(label: string, tz = DEFAULT_TZ): string | null {
+    if (!label) return null;
+    const raw = label.trim().toLowerCase();
+  
+    // Extract day of week, if any
+    const dayKey = Object.keys(DAY_ALIASES).find(k => raw.includes(k));
+    const targetDow = dayKey ? DAY_ALIASES[dayKey] : null;
+  
+    // Extract explicit time if present (e.g., 10am, 1:30 pm, 13:00)
+    let hh: number | null = null;
+    let mm = 0;
+    const timeMatch = raw.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?|(\d{1,2}):(\d{2})/);
+    if (timeMatch) {
+      const h1 = timeMatch[1] ? parseInt(timeMatch[1], 10) : (timeMatch[4] ? parseInt(timeMatch[4], 10) : NaN);
+      const m1 = timeMatch[2] ? parseInt(timeMatch[2], 10) : (timeMatch[5] ? parseInt(timeMatch[5], 10) : 0);
+      const ap = timeMatch[3];
+      if (!isNaN(h1)) {
+        if (ap) {
+          hh = (h1 % 12) + (ap.toLowerCase() === "pm" ? 12 : 0);
+        } else {
+          // 24h guess
+          hh = h1;
+        }
+        mm = isNaN(m1) ? 0 : m1;
+      }
+    } else {
+      // No explicit time: check for morning/afternoon/evening
+      hh = partOfDayToHour(raw);
+    }
+  
+    // Find next occurrence (>= today), then if that is < 48h away, push forward to satisfy the "book +48h" rule downstream
+    const now = new Date();
+    let base = new Date(now);
+    if (targetDow !== null) {
+      const delta = (targetDow - now.getDay() + 7) % 7;
+      base.setDate(now.getDate() + delta + (delta === 0 ? 7 : 0)); // If today mentioned, move to next week to avoid same-day
+    }
+    const y = base.getFullYear();
+    const m = base.getMonth() + 1;
+    const d = base.getDate();
+    const iso = toLocalISO(y, m, d, hh ?? 14, mm, tz);
+    return iso;
+  }
+  
+  /** 48h from now, rounded to nearest half hour, and nudged into business hours (9–5) */
+  function iso48hFromNow(tz = DEFAULT_TZ): string {
+    const now = new Date();
+    const t = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    // round to nearest 30 min
+    const mins = t.getUTCMinutes();
+    const rounded = mins < 15 ? 0 : mins < 45 ? 30 : 0;
+    if (rounded === 0 && mins >= 45) t.setUTCHours(t.getUTCHours() + 1);
+    t.setUTCMinutes(rounded, 0, 0);
+  
+    // Nudge into business hours 9–17 local-equivalent (approx; real TZ handling should be server-side)
+    const h = t.getUTCHours();
+    if (h < 13) t.setUTCHours(13);       // ~9am ET
+    if (h > 21) t.setUTCHours(19);       // ~3pm ET
+    return t.toISOString();
+  }
+  
+  // ---- Fixed, single definition --------------------------------
+  async function scheduleWithCalendar(args: {
+    email: string;
+    label?: string;        // "Wednesday afternoon" or "Fri 10am"
+    startIso?: string;
+    tz?: string;
+    roomId: string;
+    agentId: string;
+    summary?: string;
+    location?: string;
+  }): Promise<BookingResult> {
+    const payload = {
       email: args.email,
       label: args.label,
       startIso: args.startIso,
@@ -244,19 +342,35 @@ async function scheduleWithCalendar(args: {
       agentId: args.agentId,
       durationMin: 60,
       createMeet: true,
-      summary: args.summary ?? 'Grand Villa Tour',
-      location: args.location ?? 'Grand Villa of Clearwater',
-      // idempotency
-      externalKey: `${args.roomId}|${args.agentId}|${args.label ?? args.startIso ?? ''}`,
-    }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data?.ok === false) {
-    return { ok: false, error: data?.error || `HTTP ${res.status}` };
-  }
-  elizaLogger.info("chris_schedule", data);
-  return { ok: true, ...data };
+      summary: args.summary ?? "Grand Villa Tour",
+      location: args.location ?? "Grand Villa of Clearwater",
+      // Include email to avoid collisions across different users
+      externalKey: `${args.roomId}|${args.agentId}|${args.email}|${args.label ?? args.startIso ?? ""}`,
+    };
+  
+    let res: Response;
+    try {
+      res = await fetch(SCHEDULE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (e: any) {
+      elizaLogger.error("scheduleWithCalendar network error", e?.message || e);
+      return { ok: false, error: "network_error" };
+    }
+  
+    let data: any = {};
+    try { data = await res.json(); } catch { /* some servers return HTML on 4xx */ }
+  
+    if (!res.ok || data?.ok === false) {
+      const err = (data && (data.error || data.message)) || `HTTP ${res.status}`;
+      elizaLogger.error("scheduleWithCalendar server error", err, data);
+      return { ok: false, error: err };
+    }
+  
+    elizaLogger.info("scheduleWithCalendar success", data);
+    return { ok: true, ...data };
 }
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
@@ -2175,318 +2289,185 @@ async function handleScheduleVisit(
     _runtime: IAgentRuntime,
     _message: Memory,
     _state: State,
-    discoveryState: any,
-    gracePersonality: string,
-    grandVillaInfo: string,
-    lastUserMessage: string
-): Promise<string> {
-    elizaLogger.info("Handling schedule visit stage");
-    
-    // Define the 3 scheduling questions we need to collect answers for
-    const schedulingQuestions = [
-        "Would Wednesday afternoon or Friday morning work better for you?",
-        "What specific date and time would work best for your visit?",
-        "What email should I send the calendar invite to?"
-    ];
-    
-    // Save user response from this stage
-    if (_message.content.text && _message.userId !== _message.agentId) {
-        await saveUserResponse(_runtime, _message, "visit_scheduling", _message.content.text);
+    _discoveryState: any,
+    _gracePersonality: string,
+    _grandVillaInfo: string,
+    _lastUserMessage: string
+  ): Promise<string> {
+    elizaLogger.info("Handling schedule visit stage (auto 48h EXACT / de-dupe)");
+  
+    // Local TZ fallback without redeclaring DEFAULT_TZ
+    const TZ = ((globalThis as any).DEFAULT_TZ ?? "America/New_York") as string;
+  
+    // helpers scoped locally to avoid duplicate symbols
+    function iso48hFromNow() {
+      const d = new Date(Date.now() + 48 * 60 * 60 * 1000);
+      d.setSeconds(0, 0);
+      return d.toISOString();
     }
     
-    // Get contact information for personalization
-    const contactInfo = await getContactInfo(_runtime, _message);
-    const useName = shouldUseName();
-    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
-    const lovedOneName = contactInfo?.loved_one_name || "your loved one";
-    const location = contactInfo?.location || "Florida";
-    
-    // Get comprehensive record to see what questions have been asked/answered
-    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
-    const visitSchedulingQAEntries = comprehensiveRecord?.visit_scheduling || [];
-    const answeredQuestions = visitSchedulingQAEntries.map(entry => entry.question);
-    
-    elizaLogger.info(`=== SCHEDULE VISIT STAGE ===`);
-    elizaLogger.info(`Current user message: ${_message.content.text}`);
-    elizaLogger.info(` ALL REQUIRED QUESTIONS:`);
-    schedulingQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
-    elizaLogger.info(`✅ ANSWERED QUESTIONS (${answeredQuestions.length}/${schedulingQuestions.length}):`);
-    answeredQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
-    elizaLogger.info(`❌ MISSING QUESTIONS:`);
-    const missingQuestions = schedulingQuestions.filter(q => !answeredQuestions.includes(q));
-    missingQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
-    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
-    elizaLogger.info(`================================`)
-    
-    // Track which questions get answered in this interaction
-    let locallyAnsweredQuestions: string[] = [...answeredQuestions];
-    
-    // If user provided a response, assign it to the next unanswered question
-    if (_message.content.text && _message.userId !== _message.agentId) {
-        // Find the first unanswered question and assign the user's response to it
-        const unansweredQuestions = schedulingQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
-        
-        if (unansweredQuestions.length > 0) {
-            const nextQuestion = unansweredQuestions[0];
-            const newSchedulingEntry = {
-                question: nextQuestion,
-                answer: _message.content.text,
-                timestamp: new Date().toISOString()
-            };
-            
-            // Save this Q&A entry to comprehensive record
-            await updateComprehensiveRecord(_runtime, _message, {
-                visit_scheduling: [newSchedulingEntry]
-            });
-            
-            locallyAnsweredQuestions.push(nextQuestion);
-            elizaLogger.info(`✓ Assigned user response to: ${nextQuestion}`);
-            elizaLogger.info(`   Answer: ${_message.content.text}`);
-        }
+    function equalWithinMinutes(aIso: string, bIso: string, minutes = 5) {
+        const diff = Math.abs(new Date(aIso).getTime() - new Date(bIso).getTime());
+        return diff <= minutes * 60 * 1000;
     }
-    
-    // Use locally tracked answers instead of database retrieval to avoid timing issues
-    const remainingQuestions = schedulingQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
-    
-    elizaLogger.info(`=== REMAINING QUESTIONS CHECK ===`);
-    elizaLogger.info(`Total answered: ${locallyAnsweredQuestions.length}/${schedulingQuestions.length}`);
-    elizaLogger.info(`Remaining questions: ${JSON.stringify(remainingQuestions)}`);
-    elizaLogger.info(`=================================`);
-    
-    // If all questions are answered, try to book the visit
-    if (remainingQuestions.length === 0) {
-        elizaLogger.info("All scheduling questions answered, attempting to book visit");
-        
-        // Extract the collected information from the 3 questions
-        const timePreference = visitSchedulingQAEntries.find(entry => 
-            entry.question === "Would Wednesday afternoon or Friday morning work better for you?"
-        )?.answer;
-        
-        const dateAndTime = visitSchedulingQAEntries.find(entry => 
-            entry.question === "What specific date and time would work best for your visit?"
-        )?.answer;
-        
-        const email = visitSchedulingQAEntries.find(entry => 
-            entry.question === "What email should I send the calendar invite to?"
-        )?.answer;
-        
-        // Also check for email in the raw text (in case it was provided inline)
-        const emailMatch = email?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-        const finalEmail = emailMatch?.[0] || email;
-        
-        elizaLogger.info(`=== BOOKING ATTEMPT ===`);
-        elizaLogger.info(`Time preference: ${timePreference}`);
-        elizaLogger.info(`Date and time: ${dateAndTime}`);
-        elizaLogger.info(`Email: ${finalEmail}`);
-        elizaLogger.info(`=======================`);
-        
-        if (finalEmail) {
-            // Combine the scheduling information into a natural language label
-            const schedulingLabel = [timePreference, dateAndTime]
-                .filter(Boolean)
-                .join(" ");
-            
-            // Try to book via scheduler
-            const booked = await scheduleWithCalendar({
-                email: finalEmail,
-                label: schedulingLabel || "Grand Villa Tour",
-                roomId: _message.roomId,
-                agentId: _message.agentId,
-                summary: "Grand Villa Tour",
-                location: "Grand Villa of Clearwater",
-            });
-            
-            if (booked.ok) {
-                const confirmation = `Perfect! I've booked your visit for ${booked.whenText} and sent a calendar invite to ${finalEmail}. We're excited to show you around!`;
-                
-                await _runtime.messageManager.createMemory({
-                    roomId: _message.roomId,
-                    userId: _message.userId,
-                    agentId: _message.agentId,
-                    content: {
-                        text: confirmation,
-                        metadata: {
-                            stage: "schedule_visit",
-                            visit_scheduled: true,
-                            eventId: booked.eventId,
-                            startIso: booked.startIso,
-                            htmlLink: booked.htmlLink,
-                        },
-                    },
-                });
-                
-                return confirmation;
-            } else {
-                // Handle booking errors
-                let errorResponse = "";
-                if (booked.error === "time_conflict") {
-                    errorResponse = "It looks like that time slot just filled up. Would you like to try a different time?";
-                } else if (booked.error === "duplicate") {
-                    errorResponse = "It looks like we already have a visit scheduled for you. Would you like to keep that or pick a different time?";
-                } else {
-                    errorResponse = `I encountered an issue booking that time (${booked.error}). Would you like to try a different time?`;
-                }
-                
-                await _runtime.messageManager.createMemory({
-                    roomId: _message.roomId,
-                    userId: _message.userId,
-                    agentId: _message.agentId,
-                    content: { text: errorResponse, metadata: { stage: "schedule_visit" } },
-                });
-                
-                return errorResponse;
-            }
-        } else {
-            // Missing email - this shouldn't happen if all questions are answered
-            const askEmailAgain = `I have your visit details, but I need your email address to send the calendar invite. What email should I use?`;
-            
-            await _runtime.messageManager.createMemory({
-                roomId: _message.roomId,
-                userId: _message.userId,
-                agentId: _message.agentId,
-                content: { text: askEmailAgain, metadata: { stage: "schedule_visit" } },
-            });
-            
-            return askEmailAgain;
-        }
-    }
-    
-    // Generate AI response that asks the next unanswered question with context
-    const nextQuestion = remainingQuestions[0];
-    const currentAnsweredCount = schedulingQuestions.length - remainingQuestions.length;
-    
-    // Get any previous answers to provide context
-    const previousAnswers = visitSchedulingQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
-    
-    const lastUserText = _message.content.text ? _message.content.text : lastUserMessage;
-    
-    // STEP 1: Determine situation classification
-    const classificationContext = `Analyze the user's message and classify the situation.
 
-        User message: "${lastUserText}"
-        
-        === CLASSIFICATION RULES ===
-        Classify as "Unexpected situation" if the message contains:
-        • Any question or curiosity about something
-        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
-        • Requests for extra details about pricing, services, amenities, locations, or policies
-        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
-        • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
-        
-        Otherwise, classify as "Normal situation".
-        
-        Return ONLY a JSON object:
-        {"status": "Normal situation" or "Unexpected situation"}`;
+    function formatWhenTZ(iso: string, tz = TZ) {
+        return new Date(iso).toLocaleString("en-US", {
+          timeZone: tz,
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        });
+      }
+      async function findExistingBooking(roomId: string) {
+        // satisfy template-literal UUID type
+        const memories = await _runtime.messageManager.getMemories({
+          roomId: roomId as `${string}-${string}-${string}-${string}-${string}`,
+          count: 50,
+        });
+        for (let i = memories.length - 1; i >= 0; i--) {
+          const md = memories[i]?.content?.metadata as any;
+          if (md?.stage === "schedule_visit" && md?.visit_scheduled && md?.eventId && md?.startIso) {
+            return md as { eventId: string; startIso: string; htmlLink?: string; email?: string };
+          }
+        }
+        return null;
+      }
     
-    let status = "Normal situation";
+    // Always +48h exactly
+    const startIso = iso48hFromNow();
+    const whenTextFallback = formatWhenTZ(startIso);
+  
+    // Find email (current message ➜ visit_info ➜ comprehensive record)
+    const userText = (_message.content?.text || _lastUserMessage || "").trim();
+    let finalEmail: string | null = null;
     
     try {
-        const classificationResponse = await generateText({
-            runtime: _runtime,
-            context: classificationContext,
-            modelClass: ModelClass.SMALL
-        });
-        
-        const classification = JSON.parse(classificationResponse);
-        status = classification.status || "Normal situation";
-        
-        elizaLogger.info(`Situation classified as: ${status}`);
-        
-    } catch (error) {
-        elizaLogger.error("Failed to classify situation:", error);
-        status = "Normal situation"; // Default fallback
+        finalEmail =
+        userText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || null;
+  
+      if (!finalEmail) {
+        const visitInfo = await getVisitInfo(_runtime, _message);
+        if (visitInfo?.email) finalEmail = visitInfo.email;
+      }
+      if (!finalEmail) {
+        const rec = await getComprehensiveRecord(_runtime, _message);
+        const allAnswers = [
+          ...(rec?.visit_scheduling ?? []).map((e) => e.answer),
+          userText,
+        ].join(" ");
+        finalEmail =
+          allAnswers.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || null;
+      }
+    } catch (e) {
+      elizaLogger.warn("Email extraction failed; continuing without email", e);
     }
     
-    // STEP 2: Generate appropriate response based on classification
-    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is providing scheduling information for their visit.
-    
-        Progress: ${currentAnsweredCount}/${schedulingQuestions.length} questions answered so far.
-        ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
-        User's last message: "${lastUserText}"
-        Situation classification: "${status}"
-        Next question to ask: "${nextQuestion}"
-
-        === RESPONSE INSTRUCTIONS ===
-        ${status === "Normal situation" ? `
-        1. For "Normal situation":
-        - Stay warm and personal.
-        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
-        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-        - Keep words under 30-40.
-        ` : `
-        2. For "Unexpected situation":
-        - Look at the last message: "${lastUserText}".
-        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If info is missing, search online and give the most accurate answer.
-        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
-        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
-        - If it's a pricing question:
-            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
-            • Add that pricing depends on the level of care and services chosen.  
-            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
-        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
-        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 50–70 words.
-        `}
-
-        Return ONLY the response text, no JSON formatting.`;
-    
-    try {
-        const aiResponse = await generateText({
-            runtime: _runtime,
-            context: responseContext,
-            modelClass: ModelClass.MEDIUM
-        });
-        
-        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        
-        elizaLogger.info("chris_response_scheduling", responseContext, aiResponse);
-        
-        // Set global responseStatus for callback
-        setGlobalResponseStatus(status);
+    // Idempotency: reuse if we already booked this exact slot
+    const existing = await findExistingBooking(_message.roomId);
+    if (existing?.startIso && equalWithinMinutes(existing.startIso, startIso, 5)) {
+      const confirmation =
+        `Great news your tour with Diana is booked!!! I’ve scheduled your tour for ${formatWhenTZ(existing.startIso)} ` +
+        `and sent a calendar invite to ${existing.email ?? finalEmail ?? "your email"}. ` +
+        `We can't wait to meet you.`;
+  
+      await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+          text: confirmation,
+          metadata: {
+            stage: "schedule_visit",
+            visit_scheduled: true,
+            eventId: existing.eventId,
+            startIso: existing.startIso,
+            htmlLink: existing.htmlLink,
+            email: existing.email ?? finalEmail ?? null,
+          },
+        },
+      });
+  
+      setGlobalResponseStatus("Normal situation");
+      return confirmation;
+    }
+  
+    // Book if we have an email; otherwise ask only for email
+    if (finalEmail) {
+      const booked: BookingResult = await scheduleWithCalendar({
+        email: finalEmail,
+        startIso,
+        roomId: _message.roomId,
+        agentId: _message.agentId,
+        summary: "Grand Villa Tour",
+        location: "Grand Villa of Clearwater",
+      });
+  
+      if (booked.ok) {
+        const confirmation =
+          `Great news your tour with Diana is booked!!! I’ve scheduled your tour for ${booked.whenText || whenTextFallback} ` +
+          `and sent a calendar invite to ${finalEmail}. We are very excited to meet you.`;
         
         await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: {
-                text: response,
-                metadata: { 
-                    askedQuestion: response,
-                    stage: "schedule_visit",
-                    responseStatus: status
-                }
-            }
+          roomId: _message.roomId,
+          userId: _message.userId,
+          agentId: _message.agentId,
+          content: {
+            text: confirmation,
+            metadata: {
+              stage: "schedule_visit",
+              visit_scheduled: true,
+              eventId: booked.eventId,
+              startIso: booked.startIso || startIso,
+              htmlLink: booked.htmlLink,
+              email: finalEmail,
+            },
+          },
         });
         
-        return response;
         
-    } catch (error) {
-        elizaLogger.error("Failed to generate AI response:", error);
-        const fallbackResponse = `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        
-        // Set global responseStatus for callback (fallback to Normal situation)
         setGlobalResponseStatus("Normal situation");
         
-        await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: {
-                text: fallbackResponse,
-                metadata: { 
-                    askedQuestion: fallbackResponse,
-                    stage: "schedule_visit",
-                    responseStatus: "Normal situation"
-                }
-            }
-        });
-        
-        return fallbackResponse;
+        return confirmation;
     }
+
+        // Non-ok booking → keep the same 48h plan and soft-confirm
+        const softConfirm =
+        `Upon reaching the property ask for Diana. ${whenTextFallback}. ` +
+        `I’ll send the calendar invite to ${finalEmail}. If you have any issues please reachout at (727)-286-3999`;
+
+        await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: {
+            text: softConfirm,
+            metadata: { stage: "schedule_visit", proposedStartIso: startIso, email: finalEmail },
+        },
+        });
+
+        setGlobalResponseStatus("Normal situation");
+        return softConfirm;
+    }
+
+    const askEmail =
+    `Great news Diana can show you around Grand Villas on ${whenTextFallback}. ` +
+    `What’s the best email to send your calendar invite to? We can't wait to meet you!!!! `;
+
+    await _runtime.messageManager.createMemory({
+        roomId: _message.roomId,
+        userId: _message.userId,
+        agentId: _message.agentId,
+        content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: startIso } },
+    });
+
+    setGlobalResponseStatus("Normal situation");
+    return askEmail;
 }
 
-  async function handleAdditionalInfo(
+export async function handleAdditionalInfo(
     _runtime: IAgentRuntime,
     _message: Memory,
     _state: State,
