@@ -208,34 +208,187 @@ const rawScheduler =
   process.env.SCHEDULER_URL ||
   'https://eliza-scheduler-production.up.railway.app/';
 
-const SCHEDULE_BASE = rawScheduler.replace(/\/+$/, ''); // strip trailing slashes
-const SCHEDULE_URL = `${SCHEDULE_BASE}/schedule`;
-const DEFAULT_TZ = process.env.TZ || 'America/New_York';
-elizaLogger.info("chris_schedule_param", SCHEDULE_BASE, SCHEDULE_URL, DEFAULT_TZ)
-
-type BookingResult = {
-  ok: boolean;
-  eventId?: string;
-  htmlLink?: string;
-  whenText?: string;
-  startIso?: string;
-  error?: string;
-};
-
-async function scheduleWithCalendar(args: {
-  email: string;
-  label?: string;        // e.g., "Wednesday afternoon" or "Fri 10am"
-  startIso?: string;
-  tz?: string;
-  roomId: string;
-  agentId: string;
-  summary?: string;
-  location?: string;
-}): Promise<BookingResult> {
-  const res = await fetch(SCHEDULE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  type BookingOk = {
+    ok: true;
+    eventId: string;
+    htmlLink: string;
+    startIso: string;
+    whenText: string;
+  };
+  
+  type BookingErr = {
+    ok: false;
+    error: string;          // e.g., "conflict", "network_error", "HTTP 409"
+    statusCode?: number;    // surface server code (e.g., 409)
+    data?: any;             // raw server response (if any)
+  };
+  
+  type BookingResult = BookingOk | BookingErr;
+  
+  // === Config ===
+  const SCHEDULE_BASE = rawScheduler.replace(/\/+$/, "");
+  const SCHEDULE_URL = `${SCHEDULE_BASE}/schedule`;
+  const DEFAULT_TZ = process.env.TZ || "America/New_York";
+  elizaLogger.info("chris_schedule_param", SCHEDULE_BASE, SCHEDULE_URL, DEFAULT_TZ);
+  
+  // === Day Aliases ===
+  const DAY_ALIASES: Record<string, number> = {
+    sun: 0, sunday: 0,
+    mon: 1, monday: 1,
+    tue: 2, tues: 2, tuesday: 2,
+    wed: 3, weds: 3, wednesday: 3,
+    thu: 4, thur: 4, thurs: 4, thursday: 4,
+    fri: 5, friday: 5,
+    sat: 6, saturday: 6,
+  };
+  
+  // === Business-hours rules ===
+  const BUSINESS_START = 10; // 10:00
+  const BUSINESS_END   = 17; // 17:00 (latest allowed start; minutes > 00 → move next biz day)
+  const MIN_LEAD_MS    = 48 * 60 * 60 * 1000;
+  
+  function isWeekend(d: Date): boolean {
+    const wd = d.getDay(); // 0 Sun, 6 Sat
+    return wd === 0 || wd === 6;
+  }
+  
+  function pushToNextBusinessDayAtStart(d: Date): void {
+    do { d.setDate(d.getDate() + 1); } while (isWeekend(d));
+    d.setHours(BUSINESS_START, 0, 0, 0);
+  }
+  
+  function clampToBusinessWindow(d: Date): Date {
+    // Weekend → push to Monday first, then enforce hours
+    if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+    else if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+  
+    const h = d.getHours();
+    const m = d.getMinutes();
+  
+    if (h < BUSINESS_START) {
+      d.setHours(BUSINESS_START, 0, 0, 0);
+    } else if (h > BUSINESS_END || (h === BUSINESS_END && m > 0)) {
+      // Past 17:00 → next business day at 10:00
+      pushToNextBusinessDayAtStart(d);
+    }
+    return d;
+  }
+  
+  /** Build local wall-time and export ISO.
+   * REQUIREMENT: run with process.env.TZ set to DEFAULT_TZ so Date(...) reflects that tz.
+   */
+  function toLocalISO(year: number, month: number, day: number, hh = 14, mm = 0, tz = DEFAULT_TZ): string {
+    if (process.env.TZ && process.env.TZ !== tz) {
+      elizaLogger.warn(`toLocalISO: process.env.TZ=${process.env.TZ} != tz=${tz}; times may drift.`);
+    }
+    const dt = new Date(year, month - 1, day, hh, mm, 0, 0); // local time (process.env.TZ)
+    return dt.toISOString();
+  }
+  
+  /** Map vague parts of day to a canonical hour within business window */
+  function partOfDayToHour(s: string): number {
+    const t = s.toLowerCase();
+    if (t.includes("morning")) return 10;     // 10:00
+    if (t.includes("noon") || t.includes("midday")) return 12;
+    if (t.includes("afternoon")) return 14;   // 14:00
+    if (t.includes("evening")) return 17;     // 17:00 (edge of window)
+    if (t.includes("night")) return 17;       // clamp to 17:00
+    return 14; // default afternoon
+  }
+  
+  /** Parse labels like "Wednesday afternoon", "Fri 10am", "tue 1:30 pm", "Friday".
+   * Returns ISO that (1) lands on requested day/time, (2) is Mon–Fri within 10:00–17:00,
+   * and (3) is at least +48h from now (pushed forward if not).
+   */
+  function resolveStartFromLabel(label: string, tz = DEFAULT_TZ): string | null {
+    if (!label) return null;
+    const raw = label.trim().toLowerCase();
+  
+    // Day of week
+    const dayKey = Object.keys(DAY_ALIASES).find(k => raw.includes(k));
+    const targetDow = dayKey ? DAY_ALIASES[dayKey] : null;
+  
+    // Time (supports "10am", "1:30 pm", "13:00")
+    let hh: number | null = null;
+    let mm = 0;
+    const timeMatch = raw.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b|\b(\d{1,2}):(\d{2})\b/);
+    if (timeMatch) {
+      const h1 = timeMatch[1] ? parseInt(timeMatch[1], 10) : (timeMatch[4] ? parseInt(timeMatch[4], 10) : NaN);
+      const m1 = timeMatch[2] ? parseInt(timeMatch[2], 10) : (timeMatch[5] ? parseInt(timeMatch[5], 10) : 0);
+      const ap = (timeMatch[3] || "").toLowerCase();
+      if (!isNaN(h1)) {
+        if (ap) hh = (h1 % 12) + (ap === "pm" ? 12 : 0);
+        else hh = h1; // 24h guess
+        mm = isNaN(m1) ? 0 : m1;
+      }
+    } else {
+      hh = partOfDayToHour(raw);
+    }
+  
+    const now = new Date();
+    const base = new Date(now);
+  
+    if (targetDow !== null) {
+      const delta = (targetDow - now.getDay() + 7) % 7;
+      base.setDate(now.getDate() + delta); // next occurrence including today
+    }
+  
+    // Build local wall-time for that date/time
+    const y = base.getFullYear();
+    const m = base.getMonth() + 1;
+    const d = base.getDate();
+    let dt = new Date(y, m - 1, d, (hh ?? 14), mm, 0, 0); // local
+  
+    // Clamp to business window + weekday
+    dt = clampToBusinessWindow(dt);
+  
+    // Ensure ≥ 48h lead; if not, push forward (7 days if user named a weekday; else next biz day 10:00)
+    while (dt.getTime() - now.getTime() < MIN_LEAD_MS) {
+      if (targetDow !== null) {
+        dt.setDate(dt.getDate() + 7); // same weekday next week
+        // keep same hour/min
+      } else {
+        pushToNextBusinessDayAtStart(dt); // next biz day 10:00
+      }
+      dt = clampToBusinessWindow(dt);
+    }
+  
+    return dt.toISOString();
+  }
+  
+  /** 48h ahead, round up to next hour, Mon–Fri 10:00–17:00 (strict) */
+  function iso48hFromNow(tz = DEFAULT_TZ): string {
+    const t = new Date(Date.now() + MIN_LEAD_MS);
+    // Round up to next whole hour
+    if (t.getMinutes() !== 0 || t.getSeconds() !== 0 || t.getMilliseconds() !== 0) {
+      t.setHours(t.getHours() + 1, 0, 0, 0);
+    } else {
+      t.setMinutes(0, 0, 0);
+    }
+    clampToBusinessWindow(t);
+    return t.toISOString();
+  }
+  
+  // ---- Scheduler call (single definition) --------------------------------
+  function buildIdempotencyKey(roomId: string, agentId: string, email: string, slot: string) {
+    // Simple and stable across retries
+    return `room:${roomId}|agent:${agentId}|email:${email.toLowerCase()}|slot:${slot}`;
+  }
+  
+  async function scheduleWithCalendar(args: {
+    email: string;
+    label?: string;        // "Wednesday afternoon" or "Fri 10am"
+    startIso?: string;
+    tz?: string;
+    roomId: string;
+    agentId: string;
+    summary?: string;
+    location?: string;
+  }): Promise<BookingResult> {
+    const slotKey = args.label ?? args.startIso ?? "";
+    const idempotencyKey = buildIdempotencyKey(args.roomId, args.agentId, args.email, slotKey);
+  
+    const payload = {
       email: args.email,
       label: args.label,
       startIso: args.startIso,
@@ -244,20 +397,61 @@ async function scheduleWithCalendar(args: {
       agentId: args.agentId,
       durationMin: 60,
       createMeet: true,
-      summary: args.summary ?? 'Grand Villa Tour',
-      location: args.location ?? 'Grand Villa of Clearwater',
-      // idempotency
-      externalKey: `${args.roomId}|${args.agentId}|${args.label ?? args.startIso ?? ''}`,
-    }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data?.ok === false) {
-    return { ok: false, error: data?.error || `HTTP ${res.status}` };
+      summary: args.summary ?? "Grand Villa Tour",
+      location: args.location ?? "Grand Villa of Clearwater",
+      // Some backends accept an app-level key in body:
+      externalKey: idempotencyKey,
+    };
+  
+    let res: Response;
+    try {
+      res = await fetch(SCHEDULE_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // Prefer header-based idempotency if server supports it:
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (e: any) {
+      elizaLogger.error("scheduleWithCalendar network error", e?.message || e);
+      return { ok: false, error: "network_error" };
+    }
+  
+    let data: any = {};
+    try { data = await res.json(); } catch { /* some servers return HTML on 4xx */ }
+  
+    if (!res.ok || data?.ok === false) {
+      // Surface the HTTP status so the handler can do conflict recovery (409 path).
+      const statusCode = res.status;
+      const errMsg = (data && (data.error || data.message)) || `HTTP ${statusCode}`;
+      elizaLogger.error("scheduleWithCalendar server error", errMsg, data);
+  
+      // Normalize conflict
+      if (statusCode === 409) {
+        return { ok: false, error: "conflict", statusCode, data };
+      }
+      return { ok: false, error: errMsg, statusCode, data };
+    }
+  
+    elizaLogger.info("scheduleWithCalendar success", data);
+    return { ok: true, ...data } as BookingOk;
   }
-  elizaLogger.info("chris_schedule", data);
-  return { ok: true, ...data };
-}
+  
+  // Export helpers your handler may need
+  export {
+    resolveStartFromLabel,
+    iso48hFromNow,
+    clampToBusinessWindow,
+    partOfDayToHour,
+    scheduleWithCalendar,
+  };
+  
+
+
+
+  
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
     description: "Universal handler that responds to every user message, regardless of content, intent, or topic. Always triggers to ensure no user input goes unhandled.",
@@ -2169,324 +2363,424 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
     return response;
 }
 
-
-// Schedule Visit Handler - Updated for 3 questions
+// Schedule Visit Handler — strict anchor to last awaiting_email proposal + conflict-safe + user-only history + 48h default + biz hours + idempotent
 async function handleScheduleVisit(
     _runtime: IAgentRuntime,
     _message: Memory,
     _state: State,
-    discoveryState: any,
-    gracePersonality: string,
-    grandVillaInfo: string,
-    lastUserMessage: string
-): Promise<string> {
-    elizaLogger.info("Handling schedule visit stage");
-    
-    // Define the 3 scheduling questions we need to collect answers for
-    const schedulingQuestions = [
-        "Would Wednesday afternoon or Friday morning work better for you?",
-        "What specific date and time would work best for your visit?",
-        "What email should I send the calendar invite to?"
-    ];
-    
-    // Save user response from this stage
-    if (_message.content.text && _message.userId !== _message.agentId) {
-        await saveUserResponse(_runtime, _message, "visit_scheduling", _message.content.text);
+    _discoveryState: any,
+    _gracePersonality: string,
+    _grandVillaInfo: string,
+    _lastUserMessage: string
+  ): Promise<string> {
+    elizaLogger.info("Handling schedule visit (strict anchor to awaiting_email + conflict-safe + user-only history)");
+  
+    // ---------- Config ----------
+    const TZ = ((globalThis as any).DEFAULT_TZ ?? "America/New_York") as string;
+    const DEDUPE_WINDOW_MIN = 5;
+    const HISTORY_SCAN_COUNT = 80;            // scan more to be safe
+    const RECENT_WINDOW_MS = 15 * 60 * 1000;  // last 15 minutes for time-ish mentions
+  
+    // ---------- Tiny helpers ----------
+    function equalWithinMinutes(aIso: string, bIso: string, minutes = DEDUPE_WINDOW_MIN): boolean {
+      const diff = Math.abs(new Date(aIso).getTime() - new Date(bIso).getTime());
+      return diff <= minutes * 60 * 1000;
     }
-    
-    // Get contact information for personalization
-    const contactInfo = await getContactInfo(_runtime, _message);
-    const useName = shouldUseName();
-    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
-    const lovedOneName = contactInfo?.loved_one_name || "your loved one";
-    const location = contactInfo?.location || "Florida";
-    
-    // Get comprehensive record to see what questions have been asked/answered
-    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
-    const visitSchedulingQAEntries = comprehensiveRecord?.visit_scheduling || [];
-    const answeredQuestions = visitSchedulingQAEntries.map(entry => entry.question);
-    
-    elizaLogger.info(`=== SCHEDULE VISIT STAGE ===`);
-    elizaLogger.info(`Current user message: ${_message.content.text}`);
-    elizaLogger.info(` ALL REQUIRED QUESTIONS:`);
-    schedulingQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
-    elizaLogger.info(`✅ ANSWERED QUESTIONS (${answeredQuestions.length}/${schedulingQuestions.length}):`);
-    answeredQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
-    elizaLogger.info(`❌ MISSING QUESTIONS:`);
-    const missingQuestions = schedulingQuestions.filter(q => !answeredQuestions.includes(q));
-    missingQuestions.forEach((q, i) => elizaLogger.info(`   ${i+1}. ${q}`));
-    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
-    elizaLogger.info(`================================`)
-    
-    // Track which questions get answered in this interaction
-    let locallyAnsweredQuestions: string[] = [...answeredQuestions];
-    
-    // If user provided a response, assign it to the next unanswered question
-    if (_message.content.text && _message.userId !== _message.agentId) {
-        // Find the first unanswered question and assign the user's response to it
-        const unansweredQuestions = schedulingQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
-        
-        if (unansweredQuestions.length > 0) {
-            const nextQuestion = unansweredQuestions[0];
-            const newSchedulingEntry = {
-                question: nextQuestion,
-                answer: _message.content.text,
-                timestamp: new Date().toISOString()
-            };
-            
-            // Save this Q&A entry to comprehensive record
-            await updateComprehensiveRecord(_runtime, _message, {
-                visit_scheduling: [newSchedulingEntry]
-            });
-            
-            locallyAnsweredQuestions.push(nextQuestion);
-            elizaLogger.info(`✓ Assigned user response to: ${nextQuestion}`);
-            elizaLogger.info(`   Answer: ${_message.content.text}`);
+    function formatWhenTZ(iso: string, tz = TZ): string {
+      return new Date(iso).toLocaleString("en-US", {
+        timeZone: tz,
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    }
+    function looksAffirmative(text: string): boolean {
+      const t = (text || "").toLowerCase().trim();
+      return /\b(yes|yep|yeah|ok|okay|sure|works|sounds good|that works|good|great|confirm)\b/.test(t);
+    }
+    function looksNegative(text: string): boolean {
+      const t = (text || "").toLowerCase();
+      return /\b(no|nope|nah|doesn'?t work|does not work|not good|can'?t|won'?t|resched|reschedule|another time|different time|change time)\b/.test(t);
+    }
+    function extractEmail(text: string): string | null {
+      if (!text || !text.includes("@")) return null; // MUST contain '@'
+      return text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || null;
+    }
+    function looksTimeish(text: string): boolean {
+      const t = (text || "").toLowerCase();
+      if (t.includes("@")) return false; // never confuse emails with time
+      return (
+        /\b(\d{1,2})(?::\d{2})?\s*(am|pm)\b/i.test(t) ||
+        /\b\d{1,2}:\d{2}\b/.test(t) ||
+        /\b(mon|monday|tue|tues|tuesday|wed|weds|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\b/i.test(t) ||
+        /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i.test(t) ||
+        /\b(morning|afternoon|evening|night|noon|midday|tomorrow|today|next)\b/i.test(t)
+      );
+    }
+    function looksLikeDefaultPrompt(s: string): boolean {
+      const t = (s || "").toLowerCase();
+      return t.includes("diana can do") && t.includes("does that time work?");
+    }
+    function memTimestamp(m: Memory): number {
+      const v: any = (m as any)?.createdAt ?? (m as any)?.timestamp ?? Date.now();
+      return typeof v === "number" ? v : new Date(v).getTime();
+    }
+  
+    // ---------- Memory helpers ----------
+    async function findExistingBooking(
+      roomId: string
+    ): Promise<null | { eventId: string; startIso: string; htmlLink?: string; email?: string }> {
+      const memories = await _runtime.messageManager.getMemories({
+        roomId: roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: 60,
+      });
+      for (let i = memories.length - 1; i >= 0; i--) {
+        const md = memories[i]?.content?.metadata as any;
+        if (md?.stage === "schedule_visit" && md?.visit_scheduled && md?.eventId && md?.startIso) {
+          return { eventId: md.eventId, startIso: md.startIso, htmlLink: md.htmlLink, email: md.email ?? null };
         }
+      }
+      return null;
     }
-    
-    // Use locally tracked answers instead of database retrieval to avoid timing issues
-    const remainingQuestions = schedulingQuestions.filter(q => !locallyAnsweredQuestions.includes(q));
-    
-    elizaLogger.info(`=== REMAINING QUESTIONS CHECK ===`);
-    elizaLogger.info(`Total answered: ${locallyAnsweredQuestions.length}/${schedulingQuestions.length}`);
-    elizaLogger.info(`Remaining questions: ${JSON.stringify(remainingQuestions)}`);
-    elizaLogger.info(`=================================`);
-    
-    // If all questions are answered, try to book the visit
-    if (remainingQuestions.length === 0) {
-        elizaLogger.info("All scheduling questions answered, attempting to book visit");
-        
-        // Extract the collected information from the 3 questions
-        const timePreference = visitSchedulingQAEntries.find(entry => 
-            entry.question === "Would Wednesday afternoon or Friday morning work better for you?"
-        )?.answer;
-        
-        const dateAndTime = visitSchedulingQAEntries.find(entry => 
-            entry.question === "What specific date and time would work best for your visit?"
-        )?.answer;
-        
-        const email = visitSchedulingQAEntries.find(entry => 
-            entry.question === "What email should I send the calendar invite to?"
-        )?.answer;
-        
-        // Also check for email in the raw text (in case it was provided inline)
-        const emailMatch = email?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-        const finalEmail = emailMatch?.[0] || email;
-        
-        elizaLogger.info(`=== BOOKING ATTEMPT ===`);
-        elizaLogger.info(`Time preference: ${timePreference}`);
-        elizaLogger.info(`Date and time: ${dateAndTime}`);
-        elizaLogger.info(`Email: ${finalEmail}`);
-        elizaLogger.info(`=======================`);
-        
-        if (finalEmail) {
-            // Combine the scheduling information into a natural language label
-            const schedulingLabel = [timePreference, dateAndTime]
-                .filter(Boolean)
-                .join(" ");
-            
-            // Try to book via scheduler
-            const booked = await scheduleWithCalendar({
-                email: finalEmail,
-                label: schedulingLabel || "Grand Villa Tour",
-                roomId: _message.roomId,
-                agentId: _message.agentId,
-                summary: "Grand Villa Tour",
-                location: "Grand Villa of Clearwater",
-            });
-            
-            if (booked.ok) {
-                const confirmation = `Perfect! I've booked your visit for ${booked.whenText} and sent a calendar invite to ${finalEmail}. We're excited to show you around!`;
-                
-                await _runtime.messageManager.createMemory({
-                    roomId: _message.roomId,
-                    userId: _message.userId,
-                    agentId: _message.agentId,
-                    content: {
-                        text: confirmation,
-                        metadata: {
-                            stage: "schedule_visit",
-                            visit_scheduled: true,
-                            eventId: booked.eventId,
-                            startIso: booked.startIso,
-                            htmlLink: booked.htmlLink,
-                        },
-                    },
-                });
-                
-                return confirmation;
-            } else {
-                // Handle booking errors
-                let errorResponse = "";
-                if (booked.error === "time_conflict") {
-                    errorResponse = "It looks like that time slot just filled up. Would you like to try a different time?";
-                } else if (booked.error === "duplicate") {
-                    errorResponse = "It looks like we already have a visit scheduled for you. Would you like to keep that or pick a different time?";
-                } else {
-                    errorResponse = `I encountered an issue booking that time (${booked.error}). Would you like to try a different time?`;
-                }
-                
-                await _runtime.messageManager.createMemory({
-                    roomId: _message.roomId,
-                    userId: _message.userId,
-                    agentId: _message.agentId,
-                    content: { text: errorResponse, metadata: { stage: "schedule_visit" } },
-                });
-                
-                return errorResponse;
-            }
-        } else {
-            // Missing email - this shouldn't happen if all questions are answered
-            const askEmailAgain = `I have your visit details, but I need your email address to send the calendar invite. What email should I use?`;
-            
-            await _runtime.messageManager.createMemory({
-                roomId: _message.roomId,
-                userId: _message.userId,
-                agentId: _message.agentId,
-                content: { text: askEmailAgain, metadata: { stage: "schedule_visit" } },
-            });
-            
-            return askEmailAgain;
+  
+    type Ctx =
+      | { status: "awaiting_email"; proposedStartIso: string }
+      | { status: "awaiting_alt_time"; proposedStartIso?: string }
+      | { status: "proposed"; proposedStartIso: string }
+      | { status: "booked"; eventId: string; startIso: string; email?: string }
+      | { status: "none" };
+  
+    async function getContext(roomId: string): Promise<Ctx> {
+      const mems = await _runtime.messageManager.getMemories({
+        roomId: roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: 60,
+      });
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const md = mems[i]?.content?.metadata as any;
+        if (md?.stage === "schedule_visit") {
+          if (md?.visit_scheduled && md?.eventId && md?.startIso) return { status: "booked", eventId: md.eventId, startIso: md.startIso, email: md.email };
+          if (md?.awaiting_email && md?.proposedStartIso)           return { status: "awaiting_email", proposedStartIso: md.proposedStartIso };
+          if (md?.awaiting_alt_time)                                return { status: "awaiting_alt_time", proposedStartIso: md?.proposedStartIso };
+          if (md?.proposedStartIso)                                 return { status: "proposed", proposedStartIso: md.proposedStartIso };
         }
+      }
+      return { status: "none" };
     }
-    
-    // Generate AI response that asks the next unanswered question with context
-    const nextQuestion = remainingQuestions[0];
-    const currentAnsweredCount = schedulingQuestions.length - remainingQuestions.length;
-    
-    // Get any previous answers to provide context
-    const previousAnswers = visitSchedulingQAEntries.map(entry => `${entry.question}: ${entry.answer}`).join(' | ');
-    
-    const lastUserText = _message.content.text ? _message.content.text : lastUserMessage;
-    
-    // STEP 1: Determine situation classification
-    const classificationContext = `Analyze the user's message and classify the situation.
-
-        User message: "${lastUserText}"
-        
-        === CLASSIFICATION RULES ===
-        Classify as "Unexpected situation" if the message contains:
-        • Any question or curiosity about something
-        • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
-        • Requests for extra details about pricing, services, amenities, locations, or policies
-        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
-        • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
-        
-        Otherwise, classify as "Normal situation".
-        
-        Return ONLY a JSON object:
-        {"status": "Normal situation" or "Unexpected situation"}`;
-    
-    let status = "Normal situation";
-    
-    try {
-        const classificationResponse = await generateText({
-            runtime: _runtime,
-            context: classificationContext,
-            modelClass: ModelClass.SMALL
-        });
-        
-        const classification = JSON.parse(classificationResponse);
-        status = classification.status || "Normal situation";
-        
-        elizaLogger.info(`Situation classified as: ${status}`);
-        
-    } catch (error) {
-        elizaLogger.error("Failed to classify situation:", error);
-        status = "Normal situation"; // Default fallback
+  
+    async function getLastAgentMessage(): Promise<Memory | null> {
+      const mems = await _runtime.messageManager.getMemories({
+        roomId: _message.roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: 30,
+      });
+      for (let i = mems.length - 1; i >= 0; i--) {
+        if (mems[i]?.agentId === _message.agentId && typeof mems[i]?.content?.text === "string") return mems[i] as any;
+      }
+      return null;
     }
-    
-    // STEP 2: Generate appropriate response based on classification
-    const responseContext = `The user ${userName ? `(${userName}) ` : ''}is providing scheduling information for their visit.
-    
-        Progress: ${currentAnsweredCount}/${schedulingQuestions.length} questions answered so far.
-        ${previousAnswers ? `Previous answers: ${previousAnswers}` : ''}
-        User's last message: "${lastUserText}"
-        Situation classification: "${status}"
-        Next question to ask: "${nextQuestion}"
-
-        === RESPONSE INSTRUCTIONS ===
-        ${status === "Normal situation" ? `
-        1. For "Normal situation":
-        - Stay warm and personal.
-        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
-        - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
-        - Keep words under 30-40.
-        ` : `
-        2. For "Unexpected situation":
-        - Look at the last message: "${lastUserText}".
-        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If info is missing, search online and give the most accurate answer.
-        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
-        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
-        - If it's a pricing question:
-            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
-            • Add that pricing depends on the level of care and services chosen.  
-            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
-        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
-        - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 50–70 words.
-        `}
-
-        Return ONLY the response text, no JSON formatting.`;
-    
-    try {
-        const aiResponse = await generateText({
-            runtime: _runtime,
-            context: responseContext,
-            modelClass: ModelClass.MEDIUM
-        });
-        
-        const response = aiResponse || `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        
-        elizaLogger.info("chris_response_scheduling", responseContext, aiResponse);
-        
-        // Set global responseStatus for callback
-        setGlobalResponseStatus(status);
-        
+  
+    // Strictly pick the right slot when the user provides an email.
+    // Priority:
+    //   1) Most recent memory with stage=schedule_visit AND awaiting_email=true AND proposedStartIso (our “Let’s target … please enter email” turn)
+    //   2) Most recent AGENT memory with proposedStartIso (e.g., “Let’s target Wed 4pm …”)
+    //   3) Most recent USER message (not agent) that looks time-ish in the last 15 min → parse
+    //   4) Fallback to default
+    async function pickAnchoredIsoForEmail(): Promise<{ iso: string; source: string }> {
+      const mems = await _runtime.messageManager.getMemories({
+        roomId: _message.roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: HISTORY_SCAN_COUNT,
+      });
+  
+      // 1) awaiting_email=true with proposedStartIso
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const md = (mems[i]?.content?.metadata as any) || {};
+        if (md?.stage === "schedule_visit" && md?.awaiting_email && md?.proposedStartIso) {
+          return { iso: md.proposedStartIso, source: "awaiting_email" };
+        }
+      }
+  
+      // 2) latest AGENT proposedStartIso
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const m = mems[i];
+        if (m?.agentId !== _message.agentId) continue;
+        const md = (m?.content?.metadata as any) || {};
+        if (md?.stage === "schedule_visit" && md?.proposedStartIso) {
+          return { iso: md.proposedStartIso, source: "agent_meta" };
+        }
+      }
+  
+      // 3) recent USER-only time-ish text (ignore agent prompts to avoid anchoring to default)
+      const now = Date.now();
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const m = mems[i];
+        if (m?.agentId === _message.agentId) continue; // user-only
+        const txt = (m?.content?.text || "") as string;
+        if (!txt) continue;
+        const ts = memTimestamp(m);
+        if (now - ts > RECENT_WINDOW_MS) break;
+        if (looksTimeish(txt)) {
+          const parsed = resolveStartFromLabel(txt);
+          if (parsed) return { iso: parsed, source: "user_recent_time" };
+        }
+      }
+  
+      // 4) default
+      return { iso: iso48hFromNow(), source: "default" };
+    }
+  
+    // ---------- Inputs ----------
+    const currentTurnText = (_message.content?.text ?? "").trim();
+    const userText = (currentTurnText || _lastUserMessage || "").trim();
+    const meta = (_message.content?.metadata as any) || {};
+    const isStageEnter = currentTurnText.length === 0 || /^stage_transition$/i.test(currentTurnText) || meta?.stage_transition === true;
+  
+    const defaultIso = iso48hFromNow();
+    const defaultWhen = formatWhenTZ(defaultIso);
+    const ctx = await getContext(_message.roomId);
+  
+    // ---------- Stage-enter suppression while waiting ----------
+    if (isStageEnter && (ctx.status === "awaiting_email" || ctx.status === "awaiting_alt_time")) {
+      elizaLogger.info("Stage-enter while awaiting info → suppress prompt.");
+      setGlobalResponseStatus("Normal situation");
+      return "";
+    }
+  
+    // ---------- 1) EMAIL present → strictly anchor to last "awaiting_email" proposal ----------
+    const email = extractEmail(userText);
+    if (email) {
+      const anchor = await pickAnchoredIsoForEmail();
+      const proposedIso = anchor.iso;
+      const chosenSource = anchor.source;
+      elizaLogger.info(`Email received; strictly anchoring to: ${chosenSource} => ${proposedIso}`);
+  
+      // Idempotency: already booked for same slot?
+      const existing = await findExistingBooking(_message.roomId);
+      if (existing?.startIso && equalWithinMinutes(existing.startIso, proposedIso)) {
+        const confirmation =
+          `Great news—your tour with Diana is already booked for ${formatWhenTZ(existing.startIso)}. ` +
+          `I’ve sent a calendar invite to ${existing.email ?? email}. We can’t wait to meet you!`;
+  
         await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: {
-                text: response,
-                metadata: { 
-                    askedQuestion: response,
-                    stage: "schedule_visit",
-                    responseStatus: status
-                }
-            }
+          roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+          content: {
+            text: confirmation,
+            metadata: {
+              stage: "schedule_visit",
+              visit_scheduled: true,
+              eventId: existing.eventId,
+              startIso: existing.startIso,
+              htmlLink: existing.htmlLink,
+              email: existing.email ?? email,
+              chosenSource,
+            },
+          },
         });
-        
-        return response;
-        
-    } catch (error) {
-        elizaLogger.error("Failed to generate AI response:", error);
-        const fallbackResponse = `${userName ? `${userName}, ` : ''}${nextQuestion}`;
-        
-        // Set global responseStatus for callback (fallback to Normal situation)
+  
         setGlobalResponseStatus("Normal situation");
-        
+        return confirmation;
+      }
+  
+      // Try to book
+      let booked: { ok: boolean; eventId?: string; startIso?: string; whenText?: string; htmlLink?: string; statusCode?: number } | null = null;
+      try {
+        booked = await scheduleWithCalendar({
+          email,
+          startIso: proposedIso,
+          roomId: _message.roomId,
+          agentId: _message.agentId,
+          tz: TZ,
+          summary: "Grand Villa Tour",
+          location: "Grand Villa of Clearwater",
+        } as any);
+      } catch (e) {
+        elizaLogger.error("scheduleWithCalendar threw", e);
+        booked = null;
+      }
+  
+      // Conflict (HTTP 409) → confirm existing if matches our slot
+      if (booked && !booked.ok && (booked as any).statusCode === 409) {
+        const again = await findExistingBooking(_message.roomId);
+        if (again?.startIso && equalWithinMinutes(again.startIso, proposedIso)) {
+          const confirmation =
+            `Great news—your tour with Diana is already booked for ${formatWhenTZ(again.startIso)}. ` +
+            `I’ve sent a calendar invite to ${again.email ?? email}. We can’t wait to meet you!`;
+          await _runtime.messageManager.createMemory({
+            roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+            content: { text: confirmation, metadata: {
+              stage: "schedule_visit", visit_scheduled: true,
+              eventId: again.eventId, startIso: again.startIso, htmlLink: again.htmlLink,
+              email: again.email ?? email, chosenSource
+            } }
+          });
+          setGlobalResponseStatus("Normal situation");
+          return confirmation;
+        }
+        // fall through to soft message if we can't reconcile
+      }
+  
+      if (booked?.ok) {
+        const whenText = booked.whenText || formatWhenTZ(booked.startIso || proposedIso);
+        const confirmation = `Perfect—your tour with Diana is booked for ${whenText}. I’ve sent a calendar invite to ${email}. We can’t wait to meet you!`;
+  
         await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: {
-                text: fallbackResponse,
-                metadata: { 
-                    askedQuestion: fallbackResponse,
-                    stage: "schedule_visit",
-                    responseStatus: "Normal situation"
-                }
-            }
+          roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+          content: {
+            text: confirmation,
+            metadata: {
+              stage: "schedule_visit",
+              visit_scheduled: true,
+              eventId: booked.eventId!,
+              startIso: (booked.startIso || proposedIso)!,
+              htmlLink: booked.htmlLink,
+              email,
+              chosenSource,
+            },
+          },
         });
-        
-        return fallbackResponse;
+  
+        setGlobalResponseStatus("Normal situation");
+        return confirmation;
+      } else {
+        const soft =
+          `Got it—I’ll target ${formatWhenTZ(proposedIso)}. I couldn’t finalize the calendar event just now, ` +
+          `but I’ll send the invite to ${email} as soon as it’s ready. If you have any issues, please call (727) 286-3999.`;
+  
+        await _runtime.messageManager.createMemory({
+          roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+          content: {
+            text: soft,
+            metadata: { stage: "schedule_visit", proposedStartIso: proposedIso, awaiting_email: false, email, chosenSource },
+          },
+        });
+  
+        setGlobalResponseStatus("Normal situation");
+        return soft;
+      }
     }
-}
-
-  async function handleAdditionalInfo(
+  
+    // ---------- 2) No email ----------
+    // 2a) Pure YES/OK → ask for email (don’t parse "ok" as 2pm)
+    if (looksAffirmative(userText) && !looksTimeish(userText)) {
+      // Prefer the very last agent proposal if any; otherwise default
+      const mems = await _runtime.messageManager.getMemories({
+        roomId: _message.roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: HISTORY_SCAN_COUNT,
+      });
+  
+      let proposedIso: string | null = null;
+  
+      // last awaiting_email proposal if exists
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const md = (mems[i]?.content?.metadata as any) || {};
+        if (md?.stage === "schedule_visit" && md?.awaiting_email && md?.proposedStartIso) {
+          proposedIso = md.proposedStartIso; break;
+        }
+      }
+      // else last agent proposed
+      if (!proposedIso) {
+        for (let i = mems.length - 1; i >= 0; i--) {
+          const m = mems[i];
+          if (m?.agentId !== _message.agentId) continue;
+          const md = (m?.content?.metadata as any) || {};
+          if (md?.stage === "schedule_visit" && md?.proposedStartIso) {
+            proposedIso = md.proposedStartIso; break;
+          }
+        }
+      }
+      if (!proposedIso) proposedIso = defaultIso;
+  
+      const whenText = formatWhenTZ(proposedIso);
+      const askEmail = `Great—let’s lock in ${whenText}. Please enter the best email for your calendar invite.`;
+  
+      await _runtime.messageManager.createMemory({
+        roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+        content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: proposedIso, awaiting_email: true } },
+      });
+  
+      setGlobalResponseStatus("Normal situation");
+      return askEmail;
+    }
+  
+    // 2b) Rejection → ask for an alternative time
+    if (looksNegative(userText) && !looksTimeish(userText)) {
+      const nudge = `No problem—what day and time work better for you? You can reply like "Tue 10am", "Wednesday 2:30pm", or "Friday afternoon".`;
+  
+      await _runtime.messageManager.createMemory({
+        roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+        content: { text: nudge, metadata: { stage: "schedule_visit", awaiting_alt_time: true } },
+      });
+  
+      setGlobalResponseStatus("Normal situation");
+      return nudge;
+    }
+  
+    // 2c) Time-like message → parse, store proposed, ask for email
+    if (looksTimeish(userText)) {
+      const parsedIso = resolveStartFromLabel(userText);
+      if (parsedIso) {
+        const whenText = formatWhenTZ(parsedIso);
+        const askEmail = `Great—let’s target ${whenText}. Please enter the best email for your calendar invite.`;
+  
+        await _runtime.messageManager.createMemory({
+          roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+          content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: parsedIso, awaiting_email: true } },
+        });
+  
+        setGlobalResponseStatus("Normal situation");
+        return askEmail;
+      }
+    }
+  
+    // 2d) If a proposal is pending, remind for email instead of proposing a new time
+    const ctxNow = await getContext(_message.roomId);
+    if (ctxNow.status === "awaiting_email" || ctxNow.status === "proposed") {
+      const whenText = formatWhenTZ((ctxNow as any).proposedStartIso);
+      const askEmail = `To confirm ${whenText}, please enter the best email for your calendar invite.`;
+  
+      await _runtime.messageManager.createMemory({
+        roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+        content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: (ctxNow as any).proposedStartIso, awaiting_email: true } },
+      });
+  
+      setGlobalResponseStatus("Normal situation");
+      return askEmail;
+    }
+  
+    // ---------- 3) Stage enter / nothing actionable → propose default (with dedupe) ----------
+    async function lastAgentPromptIsDuplicate(): Promise<boolean> {
+      const lastAgent = await getLastAgentMessage();
+      const lastText = lastAgent?.content?.text || "";
+      const lastMeta = (lastAgent?.content?.metadata as any) || {};
+      const samePrompt = looksLikeDefaultPrompt(lastText);
+      const sameSlot = lastMeta?.proposedStartIso ? equalWithinMinutes(lastMeta.proposedStartIso, defaultIso) : false;
+      return samePrompt && sameSlot;
+    }
+  
+    try {
+      if (await lastAgentPromptIsDuplicate()) {
+        elizaLogger.info("Skipping duplicate default prompt.");
+        setGlobalResponseStatus("Normal situation");
+        return "";
+      }
+    } catch {}
+  
+    const prompt =
+      `Diana can do ${defaultWhen}. ` +
+      `Does that time work? If YES, please enter your email. If NO, please reply with a new day & time (e.g., "Wed 4pm").Please note visit time must be between 10am-5pm Monday-Friday.`;
+  
+    await _runtime.messageManager.createMemory({
+      roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+      content: { text: prompt, metadata: { stage: "schedule_visit", proposedStartIso: defaultIso, awaiting_email: false } },
+    });
+  
+    setGlobalResponseStatus("Normal situation");
+    return prompt;
+  }
+  
+  
+  
+export async function handleAdditionalInfo(
     _runtime: IAgentRuntime,
     _message: Memory,
     _state: State,

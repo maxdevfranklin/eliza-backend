@@ -10,3 +10,5 @@ logs
 db.sqlite
 .idea
 .tee-cloud
+# macOS
+.DS_Store
