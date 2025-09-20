@@ -215,15 +215,20 @@ const rawScheduler =
     startIso: string;
     whenText: string;
   };
-  type BookingErr = { ok: false; error: string };
-  type BookingResult = BookingOk | BookingErr;
-
-const SCHEDULE_BASE = rawScheduler.replace(/\/+$/, ''); // strip trailing slashes
-const SCHEDULE_URL = `${SCHEDULE_BASE}/schedule`;
-const DEFAULT_TZ = process.env.TZ || 'America/New_York';
-elizaLogger.info("chris_schedule_param", SCHEDULE_BASE, SCHEDULE_URL, DEFAULT_TZ)
-
-const DAY_ALIASES: Record<string, number> = {
+   type BookingErr = {
+    ok: false;
+    error: string;          // e.g., "conflict", "network_error", "HTTP 409"
+    statusCode?: number;    // surface server code (e.g., 409)
+    data?: any;             // raw server response (if any)
+  };
+   type BookingResult = BookingOk | BookingErr;
+   // === Config ===
+  const SCHEDULE_BASE = rawScheduler.replace(/\/+$/, "");
+  const SCHEDULE_URL = `${SCHEDULE_BASE}/schedule`;
+  const DEFAULT_TZ = process.env.TZ || "America/New_York";
+  elizaLogger.info("chris_schedule_param", SCHEDULE_BASE, SCHEDULE_URL, DEFAULT_TZ);
+   // === Day Aliases ===
+  const DAY_ALIASES: Record<string, number> = {
     sun: 0, sunday: 0,
     mon: 1, monday: 1,
     tue: 2, tues: 2, tuesday: 2,
@@ -232,98 +237,121 @@ const DAY_ALIASES: Record<string, number> = {
     fri: 5, friday: 5,
     sat: 6, saturday: 6,
   };
-  function pad(n: number) { return `${n}`.padStart(2, "0"); }
-  function toLocalISO(year: number, month: number, day: number, hh = 14, mm = 0, tz = DEFAULT_TZ) {
-    // Build local time then convert to ISO
-    const dt = new Date(
-      // create as if UTC, then adjust by timezone offset via Intl is overkill; we use fixed local -> ISO assumption:
-      // safer: use Date with local, then toISOString after setting local components
-      // but JS Date lacks tz; we rely on server TZ == DEFAULT_TZ or your scheduler does tz normalization.
-      // If your scheduler expects local wall time + tz string, it's fine to send {startIso, tz}.
-      Date.UTC(year, month - 1, day, hh, mm, 0, 0)
-    );
+   // === Business-hours rules ===
+  const BUSINESS_START = 10; // 10:00
+  const BUSINESS_END   = 17; // 17:00 (latest allowed start; minutes > 00 → move next biz day)
+  const MIN_LEAD_MS    = 48 * 60 * 60 * 1000;
+   function isWeekend(d: Date): boolean {
+    const wd = d.getDay(); // 0 Sun, 6 Sat
+    return wd === 0 || wd === 6;
+  }
+   function pushToNextBusinessDayAtStart(d: Date): void {
+    do { d.setDate(d.getDate() + 1); } while (isWeekend(d));
+    d.setHours(BUSINESS_START, 0, 0, 0);
+  }
+   function clampToBusinessWindow(d: Date): Date {
+    // Weekend → push to Monday first, then enforce hours
+    if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+    else if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+     const h = d.getHours();
+    const m = d.getMinutes();
+     if (h < BUSINESS_START) {
+      d.setHours(BUSINESS_START, 0, 0, 0);
+    } else if (h > BUSINESS_END || (h === BUSINESS_END && m > 0)) {
+      // Past 17:00 → next business day at 10:00
+      pushToNextBusinessDayAtStart(d);
+    }
+    return d;
+  }
+   /** Build local wall-time and export ISO.
+   * REQUIREMENT: run with process.env.TZ set to DEFAULT_TZ so Date(...) reflects that tz.
+   */
+  function toLocalISO(year: number, month: number, day: number, hh = 14, mm = 0, tz = DEFAULT_TZ): string {
+    if (process.env.TZ && process.env.TZ !== tz) {
+      elizaLogger.warn(`toLocalISO: process.env.TZ=${process.env.TZ} != tz=${tz}; times may drift.`);
+    }
+    const dt = new Date(year, month - 1, day, hh, mm, 0, 0); // local time (process.env.TZ)
     return dt.toISOString();
   }
-  
-  /** Map vague parts of day to a canonical hour */
+   /** Map vague parts of day to a canonical hour within business window */
   function partOfDayToHour(s: string): number {
     const t = s.toLowerCase();
     if (t.includes("morning")) return 10;     // 10:00
     if (t.includes("noon") || t.includes("midday")) return 12;
-    if (t.includes("afternoon")) return 14;   // 2pm
-    if (t.includes("evening")) return 17;     // 5pm
-    if (t.includes("night")) return 18;       // 6pm
+    if (t.includes("afternoon")) return 14;   // 14:00
+    if (t.includes("evening")) return 17;     // 17:00 (edge of window)
+    if (t.includes("night")) return 17;       // clamp to 17:00
     return 14; // default afternoon
   }
-  
-  /**
-   * Very small parser for labels like:
-   *   "Wednesday afternoon", "Fri 10am", "tue 1:30 pm", "Friday"
-   * Returns a start ISO for the *next* occurrence of that day/time.
+   /** Parse labels like "Wednesday afternoon", "Fri 10am", "tue 1:30 pm", "Friday".
+   * Returns ISO that (1) lands on requested day/time, (2) is Mon–Fri within 10:00–17:00,
+   * and (3) is at least +48h from now (pushed forward if not).
    */
   function resolveStartFromLabel(label: string, tz = DEFAULT_TZ): string | null {
     if (!label) return null;
     const raw = label.trim().toLowerCase();
-  
-    // Extract day of week, if any
+     // Day of week
     const dayKey = Object.keys(DAY_ALIASES).find(k => raw.includes(k));
     const targetDow = dayKey ? DAY_ALIASES[dayKey] : null;
-  
-    // Extract explicit time if present (e.g., 10am, 1:30 pm, 13:00)
+     // Time (supports "10am", "1:30 pm", "13:00")
     let hh: number | null = null;
     let mm = 0;
-    const timeMatch = raw.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?|(\d{1,2}):(\d{2})/);
+    const timeMatch = raw.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b|\b(\d{1,2}):(\d{2})\b/);
     if (timeMatch) {
       const h1 = timeMatch[1] ? parseInt(timeMatch[1], 10) : (timeMatch[4] ? parseInt(timeMatch[4], 10) : NaN);
       const m1 = timeMatch[2] ? parseInt(timeMatch[2], 10) : (timeMatch[5] ? parseInt(timeMatch[5], 10) : 0);
-      const ap = timeMatch[3];
+      const ap = (timeMatch[3] || "").toLowerCase();
       if (!isNaN(h1)) {
-        if (ap) {
-          hh = (h1 % 12) + (ap.toLowerCase() === "pm" ? 12 : 0);
-        } else {
-          // 24h guess
-          hh = h1;
-        }
+        if (ap) hh = (h1 % 12) + (ap === "pm" ? 12 : 0);
+        else hh = h1; // 24h guess
         mm = isNaN(m1) ? 0 : m1;
       }
     } else {
-      // No explicit time: check for morning/afternoon/evening
       hh = partOfDayToHour(raw);
     }
-  
-    // Find next occurrence (>= today), then if that is < 48h away, push forward to satisfy the "book +48h" rule downstream
-    const now = new Date();
-    let base = new Date(now);
-    if (targetDow !== null) {
+     const now = new Date();
+    const base = new Date(now);
+     if (targetDow !== null) {
       const delta = (targetDow - now.getDay() + 7) % 7;
-      base.setDate(now.getDate() + delta + (delta === 0 ? 7 : 0)); // If today mentioned, move to next week to avoid same-day
+      base.setDate(now.getDate() + delta); // next occurrence including today
     }
+     // Build local wall-time for that date/time
     const y = base.getFullYear();
     const m = base.getMonth() + 1;
     const d = base.getDate();
-    const iso = toLocalISO(y, m, d, hh ?? 14, mm, tz);
-    return iso;
+    let dt = new Date(y, m - 1, d, (hh ?? 14), mm, 0, 0); // local
+     // Clamp to business window + weekday
+    dt = clampToBusinessWindow(dt);
+     // Ensure ≥ 48h lead; if not, push forward (7 days if user named a weekday; else next biz day 10:00)
+    while (dt.getTime() - now.getTime() < MIN_LEAD_MS) {
+      if (targetDow !== null) {
+        dt.setDate(dt.getDate() + 7); // same weekday next week
+        // keep same hour/min
+      } else {
+        pushToNextBusinessDayAtStart(dt); // next biz day 10:00
+      }
+      dt = clampToBusinessWindow(dt);
+    }
+     return dt.toISOString();
   }
-  
-  /** 48h from now, rounded to nearest half hour, and nudged into business hours (9–5) */
+   /** 48h ahead, round up to next hour, Mon–Fri 10:00–17:00 (strict) */
   function iso48hFromNow(tz = DEFAULT_TZ): string {
-    const now = new Date();
-    const t = new Date(now.getTime() + 48 * 60 * 60 * 1000);
-    // round to nearest 30 min
-    const mins = t.getUTCMinutes();
-    const rounded = mins < 15 ? 0 : mins < 45 ? 30 : 0;
-    if (rounded === 0 && mins >= 45) t.setUTCHours(t.getUTCHours() + 1);
-    t.setUTCMinutes(rounded, 0, 0);
-  
-    // Nudge into business hours 9–17 local-equivalent (approx; real TZ handling should be server-side)
-    const h = t.getUTCHours();
-    if (h < 13) t.setUTCHours(13);       // ~9am ET
-    if (h > 21) t.setUTCHours(19);       // ~3pm ET
+    const t = new Date(Date.now() + MIN_LEAD_MS);
+    // Round up to next whole hour
+    if (t.getMinutes() !== 0 || t.getSeconds() !== 0 || t.getMilliseconds() !== 0) {
+      t.setHours(t.getHours() + 1, 0, 0, 0);
+    } else {
+      t.setMinutes(0, 0, 0);
+    }
+    clampToBusinessWindow(t);
     return t.toISOString();
   }
-  
-  // ---- Fixed, single definition --------------------------------
-  async function scheduleWithCalendar(args: {
+   // ---- Scheduler call (single definition) --------------------------------
+  function buildIdempotencyKey(roomId: string, agentId: string, email: string, slot: string) {
+    // Simple and stable across retries
+    return `room:${roomId}|agent:${agentId}|email:${email.toLowerCase()}|slot:${slot}`;
+  }
+   async function scheduleWithCalendar(args: {
     email: string;
     label?: string;        // "Wednesday afternoon" or "Fri 10am"
     startIso?: string;
@@ -333,7 +361,9 @@ const DAY_ALIASES: Record<string, number> = {
     summary?: string;
     location?: string;
   }): Promise<BookingResult> {
-    const payload = {
+    const slotKey = args.label ?? args.startIso ?? "";
+    const idempotencyKey = buildIdempotencyKey(args.roomId, args.agentId, args.email, slotKey);
+     const payload = {
       email: args.email,
       label: args.label,
       startIso: args.startIso,
@@ -344,34 +374,50 @@ const DAY_ALIASES: Record<string, number> = {
       createMeet: true,
       summary: args.summary ?? "Grand Villa Tour",
       location: args.location ?? "Grand Villa of Clearwater",
-      // Include email to avoid collisions across different users
-      externalKey: `${args.roomId}|${args.agentId}|${args.email}|${args.label ?? args.startIso ?? ""}`,
+      // Some backends accept an app-level key in body:
+      externalKey: idempotencyKey,
     };
-  
-    let res: Response;
+     let res: Response;
     try {
       res = await fetch(SCHEDULE_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // Prefer header-based idempotency if server supports it:
+          "Idempotency-Key": idempotencyKey,
+        },
         body: JSON.stringify(payload),
       });
     } catch (e: any) {
       elizaLogger.error("scheduleWithCalendar network error", e?.message || e);
       return { ok: false, error: "network_error" };
     }
-  
-    let data: any = {};
+     let data: any = {};
     try { data = await res.json(); } catch { /* some servers return HTML on 4xx */ }
-  
-    if (!res.ok || data?.ok === false) {
-      const err = (data && (data.error || data.message)) || `HTTP ${res.status}`;
-      elizaLogger.error("scheduleWithCalendar server error", err, data);
-      return { ok: false, error: err };
+     if (!res.ok || data?.ok === false) {
+      // Surface the HTTP status so the handler can do conflict recovery (409 path).
+      const statusCode = res.status;
+      const errMsg = (data && (data.error || data.message)) || `HTTP ${statusCode}`;
+      elizaLogger.error("scheduleWithCalendar server error", errMsg, data);
+       // Normalize conflict
+      if (statusCode === 409) {
+        return { ok: false, error: "conflict", statusCode, data };
+      }
+      return { ok: false, error: errMsg, statusCode, data };
     }
-  
-    elizaLogger.info("scheduleWithCalendar success", data);
-    return { ok: true, ...data };
-}
+     elizaLogger.info("scheduleWithCalendar success", data);
+    return { ok: true, ...data } as BookingOk;
+  }
+   // Export helpers your handler may need
+  export {
+    resolveStartFromLabel,
+    iso48hFromNow,
+    clampToBusinessWindow,
+    partOfDayToHour,
+    scheduleWithCalendar,
+  };
+ 
+
 export const grandVillaDiscoveryAction: Action = {
     name: "grand-villa-discovery",
     description: "Universal handler that responds to every user message, regardless of content, intent, or topic. Always triggers to ensure no user input goes unhandled.",
@@ -2288,7 +2334,7 @@ async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _sta
 }
 
 
-// Schedule Visit Handler - Updated for 3 questions
+// Schedule Visit Handler — strict anchor to last awaiting_email proposal + conflict-safe + user-only history + 48h default + biz hours + idempotent
 async function handleScheduleVisit(
     _runtime: IAgentRuntime,
     _message: Memory,
@@ -2298,178 +2344,367 @@ async function handleScheduleVisit(
     _grandVillaInfo: string,
     _lastUserMessage: string
   ): Promise<string> {
-    elizaLogger.info("Handling schedule visit stage (auto 48h EXACT / de-dupe)");
-  
-    // Local TZ fallback without redeclaring DEFAULT_TZ
+    elizaLogger.info("Handling schedule visit (strict anchor to awaiting_email + conflict-safe + user-only history)");
+     // ---------- Config ----------
     const TZ = ((globalThis as any).DEFAULT_TZ ?? "America/New_York") as string;
-  
-    // helpers scoped locally to avoid duplicate symbols
-    function iso48hFromNow() {
-      const d = new Date(Date.now() + 48 * 60 * 60 * 1000);
-      d.setSeconds(0, 0);
-      return d.toISOString();
+    const DEDUPE_WINDOW_MIN = 5;
+    const HISTORY_SCAN_COUNT = 80;            // scan more to be safe
+    const RECENT_WINDOW_MS = 15 * 60 * 1000;  // last 15 minutes for time-ish mentions
+     // ---------- Tiny helpers ----------
+    function equalWithinMinutes(aIso: string, bIso: string, minutes = DEDUPE_WINDOW_MIN): boolean {
+      const diff = Math.abs(new Date(aIso).getTime() - new Date(bIso).getTime());
+      return diff <= minutes * 60 * 1000;
     }
-    
-    function equalWithinMinutes(aIso: string, bIso: string, minutes = 5) {
-        const diff = Math.abs(new Date(aIso).getTime() - new Date(bIso).getTime());
-        return diff <= minutes * 60 * 1000;
+    function formatWhenTZ(iso: string, tz = TZ): string {
+      return new Date(iso).toLocaleString("en-US", {
+        timeZone: tz,
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
     }
-
-    function formatWhenTZ(iso: string, tz = TZ) {
-        return new Date(iso).toLocaleString("en-US", {
-          timeZone: tz,
-          weekday: "long",
-          month: "long",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        });
-      }
-      async function findExistingBooking(roomId: string) {
-        // satisfy template-literal UUID type
-        const memories = await _runtime.messageManager.getMemories({
-          roomId: roomId as `${string}-${string}-${string}-${string}-${string}`,
-          count: 50,
-        });
-        for (let i = memories.length - 1; i >= 0; i--) {
-          const md = memories[i]?.content?.metadata as any;
-          if (md?.stage === "schedule_visit" && md?.visit_scheduled && md?.eventId && md?.startIso) {
-            return md as { eventId: string; startIso: string; htmlLink?: string; email?: string };
-          }
+    function looksAffirmative(text: string): boolean {
+      const t = (text || "").toLowerCase().trim();
+      return /\b(yes|yep|yeah|ok|okay|sure|works|sounds good|that works|good|great|confirm)\b/.test(t);
+    }
+    function looksNegative(text: string): boolean {
+      const t = (text || "").toLowerCase();
+      return /\b(no|nope|nah|doesn'?t work|does not work|not good|can'?t|won'?t|resched|reschedule|another time|different time|change time)\b/.test(t);
+    }
+    function extractEmail(text: string): string | null {
+      if (!text || !text.includes("@")) return null; // MUST contain '@'
+      return text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || null;
+    }
+    function looksTimeish(text: string): boolean {
+      const t = (text || "").toLowerCase();
+      if (t.includes("@")) return false; // never confuse emails with time
+      return (
+        /\b(\d{1,2})(?::\d{2})?\s*(am|pm)\b/i.test(t) ||
+        /\b\d{1,2}:\d{2}\b/.test(t) ||
+        /\b(mon|monday|tue|tues|tuesday|wed|weds|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\b/i.test(t) ||
+        /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i.test(t) ||
+        /\b(morning|afternoon|evening|night|noon|midday|tomorrow|today|next)\b/i.test(t)
+      );
+    }
+    function looksLikeDefaultPrompt(s: string): boolean {
+      const t = (s || "").toLowerCase();
+      return t.includes("diana can do") && t.includes("does that time work?");
+    }
+    function memTimestamp(m: Memory): number {
+      const v: any = (m as any)?.createdAt ?? (m as any)?.timestamp ?? Date.now();
+      return typeof v === "number" ? v : new Date(v).getTime();
+    }
+     // ---------- Memory helpers ----------
+    async function findExistingBooking(
+      roomId: string
+    ): Promise<null | { eventId: string; startIso: string; htmlLink?: string; email?: string }> {
+      const memories = await _runtime.messageManager.getMemories({
+        roomId: roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: 60,
+      });
+      for (let i = memories.length - 1; i >= 0; i--) {
+        const md = memories[i]?.content?.metadata as any;
+        if (md?.stage === "schedule_visit" && md?.visit_scheduled && md?.eventId && md?.startIso) {
+          return { eventId: md.eventId, startIso: md.startIso, htmlLink: md.htmlLink, email: md.email ?? null };
         }
-        return null;
       }
-    
-    // Always +48h exactly
-    const startIso = iso48hFromNow();
-    const whenTextFallback = formatWhenTZ(startIso);
-  
-    // Find email (current message ➜ visit_info ➜ comprehensive record)
-    const userText = (_message.content?.text || _lastUserMessage || "").trim();
-    let finalEmail: string | null = null;
-    
-    try {
-        finalEmail =
-        userText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || null;
-  
-      if (!finalEmail) {
-        const visitInfo = await getVisitInfo(_runtime, _message);
-        if (visitInfo?.email) finalEmail = visitInfo.email;
-      }
-      if (!finalEmail) {
-        const rec = await getComprehensiveRecord(_runtime, _message);
-        const allAnswers = [
-          ...(rec?.visit_scheduling ?? []).map((e) => e.answer),
-          userText,
-        ].join(" ");
-        finalEmail =
-          allAnswers.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || null;
-      }
-    } catch (e) {
-      elizaLogger.warn("Email extraction failed; continuing without email", e);
+      return null;
     }
-    
-    // Idempotency: reuse if we already booked this exact slot
-    const existing = await findExistingBooking(_message.roomId);
-    if (existing?.startIso && equalWithinMinutes(existing.startIso, startIso, 5)) {
-      const confirmation =
-        `Great news your tour with Diana is booked!!! I’ve scheduled your tour for ${formatWhenTZ(existing.startIso)} ` +
-        `and sent a calendar invite to ${existing.email ?? finalEmail ?? "your email"}. ` +
-        `We can't wait to meet you.`;
-  
-      await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: {
-          text: confirmation,
-          metadata: {
-            stage: "schedule_visit",
-            visit_scheduled: true,
-            eventId: existing.eventId,
-            startIso: existing.startIso,
-            htmlLink: existing.htmlLink,
-            email: existing.email ?? finalEmail ?? null,
-          },
-        },
+     type Ctx =
+      | { status: "awaiting_email"; proposedStartIso: string }
+      | { status: "awaiting_alt_time"; proposedStartIso?: string }
+      | { status: "proposed"; proposedStartIso: string }
+      | { status: "booked"; eventId: string; startIso: string; email?: string }
+      | { status: "none" };
+     async function getContext(roomId: string): Promise<Ctx> {
+      const mems = await _runtime.messageManager.getMemories({
+        roomId: roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: 60,
       });
-  
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const md = mems[i]?.content?.metadata as any;
+        if (md?.stage === "schedule_visit") {
+          if (md?.visit_scheduled && md?.eventId && md?.startIso) return { status: "booked", eventId: md.eventId, startIso: md.startIso, email: md.email };
+          if (md?.awaiting_email && md?.proposedStartIso)           return { status: "awaiting_email", proposedStartIso: md.proposedStartIso };
+          if (md?.awaiting_alt_time)                                return { status: "awaiting_alt_time", proposedStartIso: md?.proposedStartIso };
+          if (md?.proposedStartIso)                                 return { status: "proposed", proposedStartIso: md.proposedStartIso };
+        }
+      }
+      return { status: "none" };
+    }
+     async function getLastAgentMessage(): Promise<Memory | null> {
+      const mems = await _runtime.messageManager.getMemories({
+        roomId: _message.roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: 30,
+      });
+      for (let i = mems.length - 1; i >= 0; i--) {
+        if (mems[i]?.agentId === _message.agentId && typeof mems[i]?.content?.text === "string") return mems[i] as any;
+      }
+      return null;
+    }
+     // Strictly pick the right slot when the user provides an email.
+    // Priority:
+    //   1) Most recent memory with stage=schedule_visit AND awaiting_email=true AND proposedStartIso (our “Let’s target … please enter email” turn)
+    //   2) Most recent AGENT memory with proposedStartIso (e.g., “Let’s target Wed 4pm …”)
+    //   3) Most recent USER message (not agent) that looks time-ish in the last 15 min → parse
+    //   4) Fallback to default
+    async function pickAnchoredIsoForEmail(): Promise<{ iso: string; source: string }> {
+      const mems = await _runtime.messageManager.getMemories({
+        roomId: _message.roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: HISTORY_SCAN_COUNT,
+      });
+       // 1) awaiting_email=true with proposedStartIso
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const md = (mems[i]?.content?.metadata as any) || {};
+        if (md?.stage === "schedule_visit" && md?.awaiting_email && md?.proposedStartIso) {
+          return { iso: md.proposedStartIso, source: "awaiting_email" };
+        }
+      }
+       // 2) latest AGENT proposedStartIso
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const m = mems[i];
+        if (m?.agentId !== _message.agentId) continue;
+        const md = (m?.content?.metadata as any) || {};
+        if (md?.stage === "schedule_visit" && md?.proposedStartIso) {
+          return { iso: md.proposedStartIso, source: "agent_meta" };
+        }
+      }
+       // 3) recent USER-only time-ish text (ignore agent prompts to avoid anchoring to default)
+      const now = Date.now();
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const m = mems[i];
+        if (m?.agentId === _message.agentId) continue; // user-only
+        const txt = (m?.content?.text || "") as string;
+        if (!txt) continue;
+        const ts = memTimestamp(m);
+        if (now - ts > RECENT_WINDOW_MS) break;
+        if (looksTimeish(txt)) {
+          const parsed = resolveStartFromLabel(txt);
+          if (parsed) return { iso: parsed, source: "user_recent_time" };
+        }
+      }
+       // 4) default
+      return { iso: iso48hFromNow(), source: "default" };
+    }
+     // ---------- Inputs ----------
+    const currentTurnText = (_message.content?.text ?? "").trim();
+    const userText = (currentTurnText || _lastUserMessage || "").trim();
+    const meta = (_message.content?.metadata as any) || {};
+    const isStageEnter = currentTurnText.length === 0 || /^stage_transition$/i.test(currentTurnText) || meta?.stage_transition === true;
+     const defaultIso = iso48hFromNow();
+    const defaultWhen = formatWhenTZ(defaultIso);
+    const ctx = await getContext(_message.roomId);
+     // ---------- Stage-enter suppression while waiting ----------
+    if (isStageEnter && (ctx.status === "awaiting_email" || ctx.status === "awaiting_alt_time")) {
+      elizaLogger.info("Stage-enter while awaiting info → suppress prompt.");
       setGlobalResponseStatus("Normal situation");
-      return confirmation;
+      return "";
     }
-  
-    // Book if we have an email; otherwise ask only for email
-    if (finalEmail) {
-      const booked: BookingResult = await scheduleWithCalendar({
-        email: finalEmail,
-        startIso,
-        roomId: _message.roomId,
-        agentId: _message.agentId,
-        summary: "Grand Villa Tour",
-        location: "Grand Villa of Clearwater",
-      });
-  
-      if (booked.ok) {
+     // ---------- 1) EMAIL present → strictly anchor to last "awaiting_email" proposal ----------
+    const email = extractEmail(userText);
+    if (email) {
+      const anchor = await pickAnchoredIsoForEmail();
+      const proposedIso = anchor.iso;
+      const chosenSource = anchor.source;
+      elizaLogger.info(`Email received; strictly anchoring to: ${chosenSource} => ${proposedIso}`);
+       // Idempotency: already booked for same slot?
+      const existing = await findExistingBooking(_message.roomId);
+      if (existing?.startIso && equalWithinMinutes(existing.startIso, proposedIso)) {
         const confirmation =
-          `Great news your tour with Diana is booked!!! I’ve scheduled your tour for ${booked.whenText || whenTextFallback} ` +
-          `and sent a calendar invite to ${finalEmail}. We are very excited to meet you.`;
-        
-        await _runtime.messageManager.createMemory({
-          roomId: _message.roomId,
-          userId: _message.userId,
-          agentId: _message.agentId,
+          `Great news—your tour with Diana is already booked for ${formatWhenTZ(existing.startIso)}. ` +
+          `I’ve sent a calendar invite to ${existing.email ?? email}. We can’t wait to meet you!`;
+         await _runtime.messageManager.createMemory({
+          roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
           content: {
             text: confirmation,
             metadata: {
               stage: "schedule_visit",
               visit_scheduled: true,
-              eventId: booked.eventId,
-              startIso: booked.startIso || startIso,
-              htmlLink: booked.htmlLink,
-              email: finalEmail,
+              eventId: existing.eventId,
+              startIso: existing.startIso,
+              htmlLink: existing.htmlLink,
+              email: existing.email ?? email,
+              chosenSource,
             },
           },
         });
-        
-        
-        setGlobalResponseStatus("Normal situation");
-        
+         setGlobalResponseStatus("Normal situation");
         return confirmation;
-    }
-
-        // Non-ok booking → keep the same 48h plan and soft-confirm
-        const softConfirm =
-        `Upon reaching the property ask for Diana. ${whenTextFallback}. ` +
-        `I’ll send the calendar invite to ${finalEmail}. If you have any issues please reachout at (727)-286-3999`;
-
-        await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: {
-            text: softConfirm,
-            metadata: { stage: "schedule_visit", proposedStartIso: startIso, email: finalEmail },
-        },
+      }
+       // Try to book
+      let booked: { ok: boolean; eventId?: string; startIso?: string; whenText?: string; htmlLink?: string; statusCode?: number } | null = null;
+      try {
+        booked = await scheduleWithCalendar({
+          email,
+          startIso: proposedIso,
+          roomId: _message.roomId,
+          agentId: _message.agentId,
+          tz: TZ,
+          summary: "Grand Villa Tour",
+          location: "Grand Villa of Clearwater",
+        } as any);
+      } catch (e) {
+        elizaLogger.error("scheduleWithCalendar threw", e);
+        booked = null;
+      }
+       // Conflict (HTTP 409) → confirm existing if matches our slot
+      if (booked && !booked.ok && (booked as any).statusCode === 409) {
+        const again = await findExistingBooking(_message.roomId);
+        if (again?.startIso && equalWithinMinutes(again.startIso, proposedIso)) {
+          const confirmation =
+            `Great news—your tour with Diana is already booked for ${formatWhenTZ(again.startIso)}. ` +
+            `I’ve sent a calendar invite to ${again.email ?? email}. We can’t wait to meet you!`;
+          await _runtime.messageManager.createMemory({
+            roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+            content: { text: confirmation, metadata: {
+              stage: "schedule_visit", visit_scheduled: true,
+              eventId: again.eventId, startIso: again.startIso, htmlLink: again.htmlLink,
+              email: again.email ?? email, chosenSource
+            } }
+          });
+          setGlobalResponseStatus("Normal situation");
+          return confirmation;
+        }
+        // fall through to soft message if we can't reconcile
+      }
+       if (booked?.ok) {
+        const whenText = booked.whenText || formatWhenTZ(booked.startIso || proposedIso);
+        const confirmation = `Perfect—your tour with Diana is booked for ${whenText}. I’ve sent a calendar invite to ${email}. We can’t wait to meet you!`;
+         await _runtime.messageManager.createMemory({
+          roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+          content: {
+            text: confirmation,
+            metadata: {
+              stage: "schedule_visit",
+              visit_scheduled: true,
+              eventId: booked.eventId!,
+              startIso: (booked.startIso || proposedIso)!,
+              htmlLink: booked.htmlLink,
+              email,
+              chosenSource,
+            },
+          },
         });
-
-        setGlobalResponseStatus("Normal situation");
-        return softConfirm;
+         setGlobalResponseStatus("Normal situation");
+        return confirmation;
+      } else {
+        const soft =
+          `Got it—I’ll target ${formatWhenTZ(proposedIso)}. I couldn’t finalize the calendar event just now, ` +
+          `but I’ll send the invite to ${email} as soon as it’s ready. If you have any issues, please call (727) 286-3999.`;
+         await _runtime.messageManager.createMemory({
+          roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+          content: {
+            text: soft,
+            metadata: { stage: "schedule_visit", proposedStartIso: proposedIso, awaiting_email: false, email, chosenSource },
+          },
+        });
+         setGlobalResponseStatus("Normal situation");
+        return soft;
+      }
     }
-
-    const askEmail =
-    `Great news Diana can show you around Grand Villas on ${whenTextFallback}. ` +
-    `What’s the best email to send your calendar invite to? We can't wait to meet you!!!! `;
-
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: startIso } },
+     // ---------- 2) No email ----------
+    // 2a) Pure YES/OK → ask for email (don’t parse "ok" as 2pm)
+    if (looksAffirmative(userText) && !looksTimeish(userText)) {
+      // Prefer the very last agent proposal if any; otherwise default
+      const mems = await _runtime.messageManager.getMemories({
+        roomId: _message.roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: HISTORY_SCAN_COUNT,
+      });
+       let proposedIso: string | null = null;
+       // last awaiting_email proposal if exists
+      for (let i = mems.length - 1; i >= 0; i--) {
+        const md = (mems[i]?.content?.metadata as any) || {};
+        if (md?.stage === "schedule_visit" && md?.awaiting_email && md?.proposedStartIso) {
+          proposedIso = md.proposedStartIso; break;
+        }
+      }
+      // else last agent proposed
+      if (!proposedIso) {
+        for (let i = mems.length - 1; i >= 0; i--) {
+          const m = mems[i];
+          if (m?.agentId !== _message.agentId) continue;
+          const md = (m?.content?.metadata as any) || {};
+          if (md?.stage === "schedule_visit" && md?.proposedStartIso) {
+            proposedIso = md.proposedStartIso; break;
+          }
+        }
+      }
+      if (!proposedIso) proposedIso = defaultIso;
+       const whenText = formatWhenTZ(proposedIso);
+      const askEmail = `Great—let’s lock in ${whenText}. Please enter the best email for your calendar invite.`;
+       await _runtime.messageManager.createMemory({
+        roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+        content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: proposedIso, awaiting_email: true } },
+      });
+       setGlobalResponseStatus("Normal situation");
+      return askEmail;
+    }
+     // 2b) Rejection → ask for an alternative time
+    if (looksNegative(userText) && !looksTimeish(userText)) {
+      const nudge = `No problem—what day and time work better for you? You can reply like "Tue 10am", "Wednesday 2:30pm", or "Friday afternoon".`;
+       await _runtime.messageManager.createMemory({
+        roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+        content: { text: nudge, metadata: { stage: "schedule_visit", awaiting_alt_time: true } },
+      });
+       setGlobalResponseStatus("Normal situation");
+      return nudge;
+    }
+     // 2c) Time-like message → parse, store proposed, ask for email
+    if (looksTimeish(userText)) {
+      const parsedIso = resolveStartFromLabel(userText);
+      if (parsedIso) {
+        const whenText = formatWhenTZ(parsedIso);
+        const askEmail = `Great—let’s target ${whenText}. Please enter the best email for your calendar invite.`;
+         await _runtime.messageManager.createMemory({
+          roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+          content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: parsedIso, awaiting_email: true } },
+        });
+         setGlobalResponseStatus("Normal situation");
+        return askEmail;
+      }
+    }
+     // 2d) If a proposal is pending, remind for email instead of proposing a new time
+    const ctxNow = await getContext(_message.roomId);
+    if (ctxNow.status === "awaiting_email" || ctxNow.status === "proposed") {
+      const whenText = formatWhenTZ((ctxNow as any).proposedStartIso);
+      const askEmail = `To confirm ${whenText}, please enter the best email for your calendar invite.`;
+       await _runtime.messageManager.createMemory({
+        roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+        content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: (ctxNow as any).proposedStartIso, awaiting_email: true } },
+      });
+       setGlobalResponseStatus("Normal situation");
+      return askEmail;
+    }
+     // ---------- 3) Stage enter / nothing actionable → propose default (with dedupe) ----------
+    async function lastAgentPromptIsDuplicate(): Promise<boolean> {
+      const lastAgent = await getLastAgentMessage();
+      const lastText = lastAgent?.content?.text || "";
+      const lastMeta = (lastAgent?.content?.metadata as any) || {};
+      const samePrompt = looksLikeDefaultPrompt(lastText);
+      const sameSlot = lastMeta?.proposedStartIso ? equalWithinMinutes(lastMeta.proposedStartIso, defaultIso) : false;
+      return samePrompt && sameSlot;
+    }
+     try {
+      if (await lastAgentPromptIsDuplicate()) {
+        elizaLogger.info("Skipping duplicate default prompt.");
+        setGlobalResponseStatus("Normal situation");
+        return "";
+      }
+    } catch {}
+     const prompt =
+      `Diana can do ${defaultWhen}. ` +
+      `Does that time work? If YES, please enter your email. If NO, please reply with a new day & time (e.g., "Wed 4pm").Please note visit time must be between 10am-5pm Monday-Friday.`;
+     await _runtime.messageManager.createMemory({
+      roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+      content: { text: prompt, metadata: { stage: "schedule_visit", proposedStartIso: defaultIso, awaiting_email: false } },
     });
-
-    setGlobalResponseStatus("Normal situation");
-    return askEmail;
-}
+     setGlobalResponseStatus("Normal situation");
+    return prompt;
+  }
+  
+ 
 
 export async function handleAdditionalInfo(
     _runtime: IAgentRuntime,
