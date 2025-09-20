@@ -1251,7 +1251,8 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         ${status === "Normal situation" ? `
         1. For "Normal situation":
         - Stay warm and personal.
-        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
+        - Address the user by ${userName} naturally.
+        - Refer to their loved one by ${lovedOneName} (avoid just “he/she”).
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
         ` : `
@@ -1481,7 +1482,8 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         ${status === "Normal situation" ? `
         1. For "Normal situation":
         - Stay warm and personal.
-        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
+        - Address the user by ${userName} naturally.
+        - Refer to their loved one by ${lovedOneName} (avoid just “he/she”).
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
         ` : `
@@ -1721,7 +1723,8 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         ${status === "Normal situation" ? `
         1. For "Normal situation":
         - Stay warm and personal.
-        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
+        - Address the user by ${userName} naturally.
+        - Refer to their loved one by ${lovedOneName} (avoid just “he/she”).
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
         ` : `
@@ -1960,7 +1963,8 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         ${status === "Normal situation" ? `
         1. For "Normal situation":
         - Stay warm and personal.
-        - ${userName} is one who talk with and ${lovedOneName} is one ${userName} cares. Use both names correctly.
+        - Address the user by ${userName} naturally.
+        - Refer to their loved one by ${lovedOneName} (avoid just “he/she”).
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
         ` : `
