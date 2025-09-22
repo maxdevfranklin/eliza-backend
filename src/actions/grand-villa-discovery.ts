@@ -195,13 +195,6 @@ interface ComprehensiveRecord {
     }[];
     last_updated: string;
 }
-
-interface ComprehensiveQA {
-    name?: string;
-    phone?: string;
-    qaEntries: QAEntry[];
-    contactCollectedAt?: string;
-}
 // Read either SCHEDULE_URL or SCHEDULER_URL and normalize
 const rawScheduler =
   process.env.SCHEDULE_URL ||
@@ -864,74 +857,6 @@ async function updateComprehensiveRecord(_runtime: IAgentRuntime, _message: Memo
     }
 }
 
-// Helper function to save Q&A entry (kept for backward compatibility)
-async function saveQAEntry(_runtime: IAgentRuntime, _message: Memory, question: string, answer: string, stage: string): Promise<void> {
-    const qaEntry: QAEntry = {
-        question: question,
-        answer: answer,
-        stage: stage,
-        timestamp: new Date().toISOString()
-    };
-    
-    elizaLogger.info(`=== SAVING Q&A ENTRY ===`);
-    elizaLogger.info(`Question: ${question}`);
-    elizaLogger.info(`Answer: ${answer}`);
-    elizaLogger.info(`Stage: ${stage}`);
-    elizaLogger.info(`========================`);
-    
-    // Save the Q&A entry
-    await saveUserResponse(_runtime, _message, "qa_entry", JSON.stringify(qaEntry));
-}
-
-// Helper function to get all Q&A entries
-async function getAllQAEntries(_runtime: IAgentRuntime, _message: Memory): Promise<QAEntry[]> {
-    try {
-        const userResponses = await getUserResponses(_runtime, _message);
-        const qaEntries: QAEntry[] = [];
-        
-        if (userResponses.qa_entry && userResponses.qa_entry.length > 0) {
-            for (const entryString of userResponses.qa_entry) {
-                try {
-                    const entry = JSON.parse(entryString);
-                    qaEntries.push(entry);
-                } catch (error) {
-                    elizaLogger.error("Error parsing Q&A entry:", error);
-                }
-            }
-        }
-        
-        return qaEntries.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    } catch (error) {
-        elizaLogger.error("Error retrieving Q&A entries:", error);
-        return [];
-    }
-}
-
-// Helper function to display Q&A summary
-async function displayQASummary(_runtime: IAgentRuntime, _message: Memory): Promise<void> {
-    const qaEntries = await getAllQAEntries(_runtime, _message);
-    const contactInfo = await getContactInfo(_runtime, _message);
-    
-    elizaLogger.info(`=== COMPREHENSIVE Q&A SUMMARY ===`);
-    if (contactInfo?.name) {
-        elizaLogger.info(`👤 Name: ${contactInfo.name}`);
-    }
-    if (contactInfo?.location) {
-        elizaLogger.info(`📞 Location: ${contactInfo.location}`);
-    }
-    elizaLogger.info(`📝 Total Q&A Entries: ${qaEntries.length}`);
-    elizaLogger.info(`==================================`);
-    
-    qaEntries.forEach((entry, index) => {
-        elizaLogger.info(`\n${index + 1}. [${entry.stage.toUpperCase()}]`);
-        elizaLogger.info(`   Q: ${entry.question}`);
-        elizaLogger.info(`   A: ${entry.answer}`);
-        elizaLogger.info(`   Time: ${entry.timestamp}`);
-    });
-    
-    elizaLogger.info(`==================================`);
-}
-
 // Trust Building Handler
 async function handleTrustBuilding(_runtime: IAgentRuntime, _message: Memory, _state: State, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     elizaLogger.info("Handling trust building stage");
@@ -1298,7 +1223,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         1. For "Normal situation":
         - Stay warm and personal.
         - Address the user by ${userName} naturally.
-        - Refer to their loved one by ${lovedOneName} (avoid just “he/she”).
+        - Refer to their loved one by ${lovedOneName} (avoid just "he/she").
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
         ` : `
@@ -1529,7 +1454,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         1. For "Normal situation":
         - Stay warm and personal.
         - Address the user by ${userName} naturally.
-        - Refer to their loved one by ${lovedOneName} (avoid just “he/she”).
+        - Refer to their loved one by ${lovedOneName} (avoid just "he/she").
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
         ` : `
@@ -1770,7 +1695,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         1. For "Normal situation":
         - Stay warm and personal.
         - Address the user by ${userName} naturally.
-        - Refer to their loved one by ${lovedOneName} (avoid just “he/she”).
+        - Refer to their loved one by ${lovedOneName} (avoid just "he/she").
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
         ` : `
@@ -2010,7 +1935,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         1. For "Normal situation":
         - Stay warm and personal.
         - Address the user by ${userName} naturally.
-        - Refer to their loved one by ${lovedOneName} (avoid just “he/she”).
+        - Refer to their loved one by ${lovedOneName} (avoid just "he/she").
         - Smoothly introduce "${nextQuestion}" so it feels like part of a conversation.
         - Keep words under 30-40.
         ` : `
@@ -2221,119 +2146,6 @@ async function handleNeedsMatching(_runtime: IAgentRuntime, _message: Memory, _s
             return await handleScheduleVisit(_runtime, transitionMessage, _state, discoveryState, gracePersonality, grandVillaInfo, _message.content.text);
 }
 
-// Info Sharing Handler
-async function handleInfoSharing(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string): Promise<string> {
-    // Save user response from this stage
-    if (_message.content.text && _message.userId !== _message.agentId) {
-        await saveUserResponse(_runtime, _message, "info_sharing", _message.content.text);
-    }
-    
-    // Get user name for potential personalization (randomly use name)
-    const useName = shouldUseName();
-    const userName = useName ? await getUserFirstName(_runtime, _message) : "";
-    
-    // Show previous user responses collected so far
-    const previousResponses = await getUserResponses(_runtime, _message);
-    elizaLogger.info(`=== INFO SHARING STAGE ===`);
-    elizaLogger.info(`Previous responses collected: ${JSON.stringify(previousResponses, null, 2)}`);
-    elizaLogger.info(`Current user message: ${_message.content.text}`);
-    elizaLogger.info(`Current user status: ${discoveryState.userStatus}`);
-    elizaLogger.info(`Using name in response: ${useName ? 'YES' : 'NO'} (${userName || 'N/A'})`);
-    elizaLogger.info(`==============================`)
-    
-    // Analyze user response and update status using AI (like earlier stages)
-    const statusContext = `Current user status: "${discoveryState.userStatus}"
-                          User ${userName ? `(${userName}) ` : ''}latest response about Grand Villa: "${_message.content.text}"
-
-                          Please analyze this information and provide TWO things in JSON format:
-                          1. An updated comprehensive status report about the user's situation, needs, interests, and what they want, building on the previous status
-                          2. A helpful response that answers their question about Grand Villa and then naturally asks if they'd like to schedule a visit
-
-                          Grand Villa Information to use in your response:
-                          Grand Villa has locations in Florida, California, and Colorado.
-                          They offer Independent Living, Assisted Living, Memory Care, and Respite Care.
-                          Facilities include dining, medication management, housekeeping, laundry, fitness centers, gardens, walking trails, salon, barber, transportation, and activity programs.
-                          Rooms are private or companion style with kitchenettes, cable TV, and Wi-Fi.
-                          Staff is available 24 hours with emergency call systems.
-                          
-                          Pricing examples:
-                          Sarasota, FL: contact for rates.
-                          Escondido, CA: starts at $4,800 per month.
-                          Grand Junction, CO: $4,587 to $5,963 per month.
-                          Ormond Beach, FL: $3,195 to $4,095 per month.
-                          New Port Richey, FL: studios from $3,095, one-bedrooms from $3,695.
-                          
-                          Activities include book clubs, sewing circles, gardening groups, music programs, art classes, cooking activities, game nights, yoga, bingo, painting, wellness programs, and outings.
-
-                          Return your response in this exact JSON format:
-                          {
-                              "updatedUserStatus": "Updated comprehensive analysis of user's status, needs, interests, and what they want, incorporating the new information they asked about",
-                              "responseMessage": "A helpful response that ${userName ? `starts with '${userName},' and then ` : ''}answers their question about Grand Villa, then naturally transitions to asking if they'd like to schedule a visit to see it firsthand. Keep it warm, informative, conversational, and LIMIT TO 50 WORDS OR LESS."
-                          }
-
-                          Make sure to return ONLY valid JSON, no additional text.`;
-
-    let updatedUserStatus = "";
-    let response = "";
-    
-    try {
-        const aiResponse = await generateText({
-            runtime: _runtime,
-            context: statusContext,
-            modelClass: ModelClass.SMALL
-        });
-
-        const parsed = JSON.parse(aiResponse);
-        // 🔧 Fix: Convert object to string if needed
-        const rawStatus = parsed.updatedUserStatus || "";
-        updatedUserStatus = typeof rawStatus === 'object' ? JSON.stringify(rawStatus) : rawStatus;
-        response = parsed.responseMessage || "";
-        
-        // Log the extracted information
-        elizaLogger.info(`=== UPDATED USER STATUS ===`);
-        elizaLogger.info(updatedUserStatus);
-        elizaLogger.info(`=== RESPONSE MESSAGE ===`);
-        elizaLogger.info(response);
-        elizaLogger.info(`===========================`);
-        
-        // Save the Q&A entry for information requests
-        if (_message.content.text && _message.userId !== _message.agentId) {
-            await saveQAEntry(_runtime, _message, "What would you like to know about Grand Villa?", _message.content.text, "info_sharing");
-        }
-        
-    } catch (error) {
-        elizaLogger.error("Failed to parse JSON response:", error);
-        // Fallback response that asks to schedule a visit
-        response = `I'd be happy to help you learn more about Grand Villa. ${userName ? `${userName}, ` : ''}would you like to schedule a visit so you can see the community and what daily life would feel like firsthand?`;
-        // Save the Q&A entry even if parsing failed
-        if (_message.content.text && _message.userId !== _message.agentId) {
-            await saveQAEntry(_runtime, _message, "What would you like to know about Grand Villa?", _message.content.text, "info_sharing");
-        }
-    }
-
-    // Fallback if response is empty
-    if (!response) {
-        response = `I'd be happy to help you learn more about Grand Villa. ${userName ? `${userName}, ` : ''}would you like to schedule a visit so you can see the community and what daily life would feel like firsthand?`;
-    }
-    
-    // Store the response in memory with stage transition to schedule_visit
-    await _runtime.messageManager.createMemory({
-        roomId: _message.roomId,
-        userId: _message.userId,
-        agentId: _message.agentId,
-        content: {
-            text: response,
-            metadata: { 
-                askedQuestion: response,
-                stage: "schedule_visit"
-            }
-        }
-    });
-    
-    return response;
-}
-
-
 // Schedule Visit Handler — strict anchor to last awaiting_email proposal + conflict-safe + user-only history + 48h default + biz hours + idempotent
 async function handleScheduleVisit(
     _runtime: IAgentRuntime,
@@ -2446,8 +2258,8 @@ async function handleScheduleVisit(
     }
      // Strictly pick the right slot when the user provides an email.
     // Priority:
-    //   1) Most recent memory with stage=schedule_visit AND awaiting_email=true AND proposedStartIso (our “Let’s target … please enter email” turn)
-    //   2) Most recent AGENT memory with proposedStartIso (e.g., “Let’s target Wed 4pm …”)
+    //   1) Most recent memory with stage=schedule_visit AND awaiting_email=true AND proposedStartIso (our "Let's target … please enter email" turn)
+    //   2) Most recent AGENT memory with proposedStartIso (e.g., "Let's target Wed 4pm …")
     //   3) Most recent USER message (not agent) that looks time-ish in the last 15 min → parse
     //   4) Fallback to default
     async function pickAnchoredIsoForEmail(): Promise<{ iso: string; source: string }> {
@@ -2496,8 +2308,28 @@ async function handleScheduleVisit(
      const defaultIso = iso48hFromNow();
     const defaultWhen = formatWhenTZ(defaultIso);
     const ctx = await getContext(_message.roomId);
+    
+    // Main process logging
+    elizaLogger.info(`MAIN PROCESS: userText="${userText}", ctx.status="${ctx.status}", isStageEnter=${isStageEnter}`);
+    
+    // ---------- First-time entry check ----------
+    // If this is a stage transition, show initial prompt regardless of previous context
+    // This ensures the initial prompt is always shown when entering the schedule_visit stage
+    if (isStageEnter) {
+      elizaLogger.info("PROCESS: Stage transition to schedule_visit → showing initial prompt");
+      const prompt =
+        `Diana can do ${defaultWhen}. ` +
+        `Does that time work? If YES, please enter your email. If NO, please reply with a new day & time (e.g., "Wed 4pm").Please note visit time must be between 10am-5pm Monday-Friday.`;
+      await _runtime.messageManager.createMemory({
+        roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+        content: { text: prompt, metadata: { stage: "schedule_visit", proposedStartIso: defaultIso, awaiting_email: false } },
+      });
+      setGlobalResponseStatus("Normal situation");
+      return prompt;
+    }
      // ---------- Stage-enter suppression while waiting ----------
     if (isStageEnter && (ctx.status === "awaiting_email" || ctx.status === "awaiting_alt_time")) {
+      elizaLogger.info("PROCESS: Stage-enter suppression → returning empty");
       elizaLogger.info("Stage-enter while awaiting info → suppress prompt.");
       setGlobalResponseStatus("Normal situation");
       return "";
@@ -2505,6 +2337,7 @@ async function handleScheduleVisit(
      // ---------- 1) EMAIL present → strictly anchor to last "awaiting_email" proposal ----------
     const email = extractEmail(userText);
     if (email) {
+      elizaLogger.info("PROCESS: Email detected → attempting booking");
       const anchor = await pickAnchoredIsoForEmail();
       const proposedIso = anchor.iso;
       const chosenSource = anchor.source;
@@ -2512,9 +2345,10 @@ async function handleScheduleVisit(
        // Idempotency: already booked for same slot?
       const existing = await findExistingBooking(_message.roomId);
       if (existing?.startIso && equalWithinMinutes(existing.startIso, proposedIso)) {
+        elizaLogger.info("chris_sch: confirmation");
         const confirmation =
           `Great news—your tour with Diana is already booked for ${formatWhenTZ(existing.startIso)}. ` +
-          `I’ve sent a calendar invite to ${existing.email ?? email}. We can’t wait to meet you!`;
+          `I've sent a calendar invite to ${existing.email ?? email}. We can't wait to meet you!`;
          await _runtime.messageManager.createMemory({
           roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
           content: {
@@ -2555,7 +2389,7 @@ async function handleScheduleVisit(
         if (again?.startIso && equalWithinMinutes(again.startIso, proposedIso)) {
           const confirmation =
             `Great news—your tour with Diana is already booked for ${formatWhenTZ(again.startIso)}. ` +
-            `I’ve sent a calendar invite to ${again.email ?? email}. We can’t wait to meet you!`;
+            `I've sent a calendar invite to ${again.email ?? email}. We can't wait to meet you!`;
           await _runtime.messageManager.createMemory({
             roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
             content: { text: confirmation, metadata: {
@@ -2571,7 +2405,7 @@ async function handleScheduleVisit(
       }
        if (booked?.ok) {
         const whenText = booked.whenText || formatWhenTZ(booked.startIso || proposedIso);
-        const confirmation = `Perfect—your tour with Diana is booked for ${whenText}. I’ve sent a calendar invite to ${email}. We can’t wait to meet you!`;
+        const confirmation = `Perfect—your tour with Diana is booked for ${whenText}. I've sent a calendar invite to ${email}. We can't wait to meet you!`;
          await _runtime.messageManager.createMemory({
           roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
           content: {
@@ -2591,8 +2425,8 @@ async function handleScheduleVisit(
         return confirmation;
       } else {
         const soft =
-          `Got it—I’ll target ${formatWhenTZ(proposedIso)}. I couldn’t finalize the calendar event just now, ` +
-          `but I’ll send the invite to ${email} as soon as it’s ready. If you have any issues, please call (727) 286-3999.`;
+          `Got it—I'll target ${formatWhenTZ(proposedIso)}. I couldn't finalize the calendar event just now, ` +
+          `but I'll send the invite to ${email} as soon as it's ready. If you have any issues, please call (727) 286-3999.`;
          await _runtime.messageManager.createMemory({
           roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
           content: {
@@ -2605,8 +2439,9 @@ async function handleScheduleVisit(
       }
     }
      // ---------- 2) No email ----------
-    // 2a) Pure YES/OK → ask for email (don’t parse "ok" as 2pm)
+    // 2a) Pure YES/OK → ask for email (don't parse "ok" as 2pm)
     if (looksAffirmative(userText) && !looksTimeish(userText)) {
+      elizaLogger.info("PROCESS: Affirmative response detected → asking for email");
       // Prefer the very last agent proposal if any; otherwise default
       const mems = await _runtime.messageManager.getMemories({
         roomId: _message.roomId as `${string}-${string}-${string}-${string}-${string}`,
@@ -2633,7 +2468,7 @@ async function handleScheduleVisit(
       }
       if (!proposedIso) proposedIso = defaultIso;
        const whenText = formatWhenTZ(proposedIso);
-      const askEmail = `Great—let’s lock in ${whenText}. Please enter the best email for your calendar invite.`;
+      const askEmail = `Great—let's lock in ${whenText}. Please enter the best email for your calendar invite.`;
        await _runtime.messageManager.createMemory({
         roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
         content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: proposedIso, awaiting_email: true } },
@@ -2656,7 +2491,7 @@ async function handleScheduleVisit(
       const parsedIso = resolveStartFromLabel(userText);
       if (parsedIso) {
         const whenText = formatWhenTZ(parsedIso);
-        const askEmail = `Great—let’s target ${whenText}. Please enter the best email for your calendar invite.`;
+        const askEmail = `Great—let's target ${whenText}. Please enter the best email for your calendar invite.`;
          await _runtime.messageManager.createMemory({
           roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
           content: { text: askEmail, metadata: { stage: "schedule_visit", proposedStartIso: parsedIso, awaiting_email: true } },
@@ -2703,270 +2538,6 @@ async function handleScheduleVisit(
      setGlobalResponseStatus("Normal situation");
     return prompt;
   }
-  
- 
-
-export async function handleAdditionalInfo(
-    _runtime: IAgentRuntime,
-    _message: Memory,
-    _state: State,
-    discoveryState: any,
-    gracePersonality: string
-  ): Promise<string> {
-    elizaLogger.info("Handling schedule visit (additional info) stage");
-  
-    // Only run extraction when we have a fresh user message
-    if (_message.content.text && _message.userId !== _message.agentId) {
-      // 1) Gather recent user texts within the schedule_visit stage
-      let scheduleVisitResponses = await getUserAnswersFromStage(
-        _runtime,
-        _message,
-        "schedule_visit"
-      );
-  
-      // Fallback: last N user-only messages from this room
-      if (scheduleVisitResponses.length === 0) {
-        elizaLogger.info(
-          "Stage-based approach returned empty, using fallback to get current user's recent messages"
-        );
-        const allMemories = await _runtime.messageManager.getMemories({
-          roomId: _message.roomId,
-          count: 20,
-        });
-  
-        scheduleVisitResponses = allMemories
-          .filter(
-            (mem) =>
-              mem.userId === _message.userId &&
-              mem.userId !== _message.agentId &&
-              mem.content.text?.trim()
-          )
-          .sort(
-            (a, b) =>
-              new Date(a.createdAt || 0).getTime() -
-              new Date(b.createdAt || 0).getTime()
-          )
-          .slice(-5)
-          .map((mem) => mem.content.text!);
-      }
-  
-      const allScheduleVisitText = scheduleVisitResponses.join(" ");
-      elizaLogger.info("=== SCHEDULE VISIT RESPONSES (rollup) ===");
-      elizaLogger.info(allScheduleVisitText);
-      elizaLogger.info("=========================================");
-  
-      // 2) Load any existing visit info to merge with
-      const existingVisitInfo = await getVisitInfo(_runtime, _message);
-  
-      // 3) Extract Email / Address / Preferred contact / Heard-about-us
-      const extractionContext = `Extract from: "${allScheduleVisitText}"
-  
-  Return ONLY valid JSON:
-  {
-    "email": "user@domain.com or null",
-    "mailingAddress": "street/city/state/zip (partial allowed) or null",
-    "preferredContact": "phone or email or null",
-    "heardAboutUs": "how they heard about us (e.g., google, friend, physician, facebook, ad, website, drive-by, other) or null",
-    "foundEmail": true/false,
-    "foundAddress": true/false,
-    "foundPreference": true/false,
-    "foundHeard": true/false
-  }`;
-  
-      try {
-        const aiResponse = await generateText({
-          runtime: _runtime,
-          context: extractionContext,
-          modelClass: ModelClass.SMALL,
-        });
-  
-        const parsed = JSON.parse(aiResponse);
-  
-        // Merge with what we might already have
-        const finalEmail =
-          (parsed.foundEmail && parsed.email) ||
-          existingVisitInfo?.email ||
-          null;
-  
-        const finalAddress =
-          (parsed.foundAddress && parsed.mailingAddress) ||
-          existingVisitInfo?.mailingAddress ||
-          null;
-  
-        const finalPreference =
-          (parsed.foundPreference && parsed.preferredContact) ||
-          existingVisitInfo?.preferredContact ||
-          null;
-  
-        const priorHeard = (existingVisitInfo as any)?.heardAboutUs || null; // cast to avoid TS complaints if type isn't updated yet
-        const finalHeardAbout =
-          (parsed.foundHeard && parsed.heardAboutUs) || priorHeard || null;
-  
-        elizaLogger.info("=== VISIT INFO EXTRACTION ===");
-        elizaLogger.info(
-          `Extracted -> email:${parsed.email ?? "null"} | address:${
-            parsed.mailingAddress ?? "null"
-          } | pref:${parsed.preferredContact ?? "null"} | heard:${
-            parsed.heardAboutUs ?? "null"
-          }`
-        );
-        elizaLogger.info(
-          `Final -> email:${finalEmail ?? "null"} | address:${
-            finalAddress ?? "null"
-          } | pref:${finalPreference ?? "null"} | heard:${
-            finalHeardAbout ?? "null"
-          }`
-        );
-        elizaLogger.info("=============================");
-  
-        // 4) If we have any new info, save it (overwrite with most complete snapshot)
-        if (finalEmail || finalAddress || finalPreference || finalHeardAbout) {
-          const snapshot = {
-            email: finalEmail,
-            mailingAddress: finalAddress,
-            preferredContact: finalPreference,
-            heardAboutUs: finalHeardAbout,
-            collectedAt: new Date().toISOString(),
-          };
-  
-          await saveUserResponse(
-            _runtime,
-            _message,
-            "visit_info",
-            JSON.stringify(snapshot)
-          );
-          elizaLogger.info(`Saved visit_info snapshot: ${JSON.stringify(snapshot)}`);
-  
-          // Also reflect in a user status line (useful for ops logs)
-          const statusUpdate = `Visit info → email:${
-            finalEmail ?? "—"
-          }, address:${finalAddress ?? "—"}, preferred:${
-            finalPreference ?? "—"
-          }, heard:${finalHeardAbout ?? "—"}`;
-          await updateUserStatus(_runtime, _message, statusUpdate);
-        }
-  
-        // 5) Decide what we still need and ask just for that
-        const missing: string[] = [];
-        if (!finalEmail) missing.push("email address");
-        if (!finalAddress) missing.push("mailing address");
-        if (!finalPreference) missing.push("preferred contact method");
-        if (!finalHeardAbout) missing.push("how you heard about us");
-  
-        // If nothing is missing, close the loop warmly
-        if (missing.length === 0) {
-          const userName = await getUserFirstName(_runtime, _message);
-          const response = `Perfect${userName ? `, ${userName}` : ""}! I've got your details noted. I'll send confirmation and directions to your ${
-            finalPreference === "email" ? "email" : "phone"
-          }. Thanks for sharing how you heard about us—that really helps. We're excited to welcome you for your visit!`;
-  
-          await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: {
-              text: response,
-              // Keep stage as schedule_visit (booking may still happen separately)
-              metadata: { stage: "schedule_visit", visit_info_complete: true },
-            },
-          });
-  
-          return response;
-        }
-  
-        // We still need something → ask *only* for the missing bits
-        let ask: string;
-        if (missing.length === 1) {
-          ask = `Almost there! I just need your ${missing[0]} to finish setting up your visit.`;
-        } else if (missing.length === 2) {
-          ask = `Great! I just need your ${missing.join(
-            " and "
-          )} to complete the scheduling.`;
-        } else {
-          ask = `Perfect! To complete your visit scheduling, I'll need your ${missing
-            .slice(0, -1)
-            .join(", ")} and ${missing.slice(-1)}.`;
-        }
-  
-        await _runtime.messageManager.createMemory({
-          roomId: _message.roomId,
-          userId: _message.userId,
-          agentId: _message.agentId,
-          content: { text: ask, metadata: { stage: "schedule_visit" } },
-        });
-  
-        return ask;
-      } catch (error) {
-        elizaLogger.error("Error extracting visit info:", error);
-        const fallback =
-          "Perfect! To complete your visit scheduling, I'll need your email address, mailing address, your preferred contact method (phone or email), and how you heard about us.";
-        await _runtime.messageManager.createMemory({
-          roomId: _message.roomId,
-          userId: _message.userId,
-          agentId: _message.agentId,
-          content: { text: fallback, metadata: { stage: "schedule_visit" } },
-        });
-        return fallback;
-      }
-    }
-  
-    // First touch in this stage (no user text yet)
-    const userName = await getUserFirstName(_runtime, _message);
-    const initial =
-      `That's wonderful${userName ? `, ${userName}` : ""}! Let's get your visit scheduled so you can experience it firsthand. ` +
-      `That's wonderful${userName ? `, ${userName}` : ""}! Let's get your visit scheduled so you can experience it firsthand. ` +
-      `Could you share your email address, mailing address, your preferred contact method (phone or email), and how you heard about us?`;
-  
-    await _runtime.messageManager.createMemory({
-      roomId: _message.roomId,
-      userId: _message.userId,
-      agentId: _message.agentId,
-      content: { text: initial, metadata: { stage: "schedule_visit" } },
-    });
-  
-    return initial;
-  }
-  
-
-// State Management Functions
-async function getDiscoveryState(_runtime: IAgentRuntime, _message: Memory): Promise<any> {
-    return await discoveryStateProvider.get(_runtime, _message);
-}
-
-async function updateDiscoveryState(_runtime: IAgentRuntime, _message: Memory, stage: string, response: string): Promise<void> {
-    const discoveryState = await getDiscoveryState(_runtime, _message);
-    elizaLogger.info(`Updating discovery state from ${discoveryState.currentStage} to ${stage}`);
-    
-    // Only update stage if it's different from current stage
-    if (stage !== discoveryState.currentStage) {
-        // Store the response with stage in metadata
-        await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: { 
-                text: response,
-                metadata: {
-                    stage: stage
-                }
-            }
-        });
-        
-        elizaLogger.info(`Added response to message history with stage: ${stage}`);
-    } else {
-        // If stage hasn't changed, just store the response without stage metadata
-        await _runtime.messageManager.createMemory({
-            roomId: _message.roomId,
-            userId: _message.userId,
-            agentId: _message.agentId,
-            content: { 
-                text: response
-            }
-        });
-        
-        elizaLogger.info(`Added response to message history without stage change`);
-    }
-}
 
 async function determineConversationStage(_runtime: IAgentRuntime, _message: Memory, discoveryState: any): Promise<string> {
     elizaLogger.info(`Determining conversation stage with state: ${JSON.stringify(discoveryState)}`);
@@ -2998,15 +2569,6 @@ async function determineConversationStage(_runtime: IAgentRuntime, _message: Mem
     // Default to trust building
     elizaLogger.info("Defaulting to trust building");
     return "trust_building";
-}
-
-async function moveToNextStage(_runtime: IAgentRuntime, _message: Memory, nextStage: string): Promise<string> {
-    const discoveryState = await getDiscoveryState(_runtime, _message);
-    discoveryState.currentStage = nextStage;
-
-    elizaLogger.info(`Moving to stage: ${nextStage}`);
-    
-    return "";
 }
 
 // Helper function to randomly decide whether to use user's name (feels more natural)
@@ -3081,49 +2643,6 @@ async function getContactInfo(_runtime: IAgentRuntime, _message: Memory): Promis
         elizaLogger.info(`getContactInfo - no contact info found`);
     } catch (error) {
         elizaLogger.error("Error retrieving contact info:", error);
-    }
-    
-    return null;
-}
-
-// Helper function to get stored visit information
-async function getVisitInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{email?: string, mailingAddress?: string, preferredContact?: string} | null> {
-    let visitInfoArray: string[] = [];
-    
-    try {
-        const userResponses = await getUserResponses(_runtime, _message);
-        elizaLogger.info(`getVisitInfo - userResponses: ${JSON.stringify(userResponses)}`);
-        
-        visitInfoArray = userResponses.visit_info || [];
-        elizaLogger.info(`getVisitInfo - visitInfoArray length: ${visitInfoArray.length}`);
-        elizaLogger.info(`getVisitInfo - visitInfoArray: ${JSON.stringify(visitInfoArray)}`);
-        
-        if (visitInfoArray.length > 0) {
-            const latestVisitInfo = visitInfoArray[visitInfoArray.length - 1];
-            elizaLogger.info(`getVisitInfo - latestVisitInfo (raw): ${latestVisitInfo}`);
-            
-            // Handle the messy format: "[Discovery Response] {"email":"...","mailingAddress":"...","preferredContact":"..."}"
-            let cleanJsonString = latestVisitInfo;
-            
-            // If it starts with "[Discovery Response]", extract the JSON part
-            if (typeof cleanJsonString === 'string' && cleanJsonString.includes('[Discovery Response]')) {
-                const jsonStart = cleanJsonString.indexOf('{');
-                if (jsonStart !== -1) {
-                    cleanJsonString = cleanJsonString.substring(jsonStart);
-                    elizaLogger.info(`getVisitInfo - extracted JSON part: ${cleanJsonString}`);
-                }
-            }
-            
-            const parsed = JSON.parse(cleanJsonString);
-            elizaLogger.info(`getVisitInfo - parsed: ${JSON.stringify(parsed)}`);
-            elizaLogger.info(`Retrieved visit info: Email=${parsed.email}, Address=${parsed.mailingAddress}, Preferred Contact=${parsed.preferredContact}`);
-            return { email: parsed.email, mailingAddress: parsed.mailingAddress, preferredContact: parsed.preferredContact };
-        }
-        
-        elizaLogger.info(`getVisitInfo - no visit info found`);
-    } catch (error) {
-        elizaLogger.error("Error retrieving visit info:", error);
-        elizaLogger.error("Raw visit info that failed to parse:", visitInfoArray);
     }
     
     return null;
@@ -3216,256 +2735,6 @@ async function getUserAnswersFromStage(_runtime: IAgentRuntime, _message: Memory
     return userAnswers;
 }
 
-// Helper function to generate personalized lifestyle questions based on previous answers
-async function generatePersonalizedLifestyleQuestion(
-    _runtime: IAgentRuntime, 
-    _message: Memory, 
-    _state: State, 
-    previousAnswers: string, 
-    questionType: string
-): Promise<string> {
-    const combinedAnswers = previousAnswers;
-    elizaLogger.info(`generatePersonalizedLifestyleQuestion ${combinedAnswers}`);
-    
-    let prompt = "";
-    
-    switch (questionType) {
-        case "daily_routine":
-            prompt = `Based on the user's previous responses about their family situation: "${combinedAnswers}", 
-                     generate a warm, empathetic question asking about their loved one's typical daily routine. 
-                     Reference specific concerns or details they mentioned. Keep it conversational and caring.`;
-            break;
-            
-        case "activities":
-            prompt = `Based on the user's previous responses: "${combinedAnswers}", 
-                     generate a personalized question asking about activities or hobbies their loved one enjoys. 
-                     Reference their specific situation and show understanding of their concerns.`;
-            break;
-            
-        case "stopped_activities":
-            prompt = `Based on the user's previous responses: "${combinedAnswers}", 
-                     generate a thoughtful question asking about activities their loved one used to enjoy but may have stopped doing. 
-                     Show empathy for their situation and acknowledge the challenges they've mentioned.`;
-            break;
-            
-        default:
-            return "Could you tell me more about your loved one's daily life?";
-    }
-    
-    try {
-        const response = await generateText({
-            runtime: _runtime,
-            context: prompt,
-            modelClass: ModelClass.SMALL
-        });
-        
-        return response || getDefaultQuestion(questionType);
-    } catch (error) {
-        elizaLogger.error(`Error generating personalized question: ${error}`);
-        return getDefaultQuestion(questionType);
-    }
-}
-
-// Helper function to generate personalized readiness questions based on previous answers
-async function generatePersonalizedReadinessQuestion(
-    _runtime: IAgentRuntime, 
-    _message: Memory, 
-    _state: State, 
-    previousAnswers: string, 
-    questionType: string
-): Promise<string> {
-    const combinedAnswers = previousAnswers;
-    elizaLogger.info(`generatePersonalizedReadinessQuestion ${combinedAnswers}`);
-    
-    let prompt = "";
-    
-    switch (questionType) {
-        case "awareness":
-            prompt = `Based on the user's previous responses about their family situation: "${combinedAnswers}", 
-                     generate a warm, empathetic question asking if their loved one is aware that they're looking at living options. 
-                     Reference specific details they mentioned and show understanding. Keep it conversational and caring.`;
-            break;
-            
-        case "feelings":
-            prompt = `Based on the user's previous responses: "${combinedAnswers}", 
-                     generate a personalized question asking about how their loved one feels about the idea of moving to a senior community. 
-                     Reference their specific situation and show empathy for their concerns.`;
-            break;
-            
-        default:
-            return "How does your loved one feel about exploring senior living options?";
-    }
-    
-    try {
-        const response = await generateText({
-            runtime: _runtime,
-            context: prompt,
-            modelClass: ModelClass.SMALL
-        });
-        
-        return response || getDefaultReadinessQuestion(questionType);
-    } catch (error) {
-        elizaLogger.error(`Error generating personalized readiness question: ${error}`);
-        return getDefaultReadinessQuestion(questionType);
-    }
-}
-
-// Helper function to generate personalized priority questions based on previous answers
-async function generatePersonalizedPriorityQuestion(
-    _runtime: IAgentRuntime, 
-    _message: Memory, 
-    _state: State, 
-    previousAnswers: string, 
-    questionType: string
-): Promise<string> {
-    const combinedAnswers = previousAnswers;
-    elizaLogger.info(`generatePersonalizedPriorityQuestion ${combinedAnswers}`);
-    
-    let prompt = "";
-    
-    switch (questionType) {
-        case "community_values":
-            prompt = `Based on the user's previous responses about their family situation: "${combinedAnswers}", 
-                     generate a warm, empathetic question asking what's most important to them in choosing a senior living community. 
-                     Reference specific concerns or details they mentioned. Keep it conversational and caring.`;
-            break;
-            
-        case "support_needs":
-            prompt = `Based on the user's previous responses: "${combinedAnswers}", 
-                     generate a personalized question asking about what kind of support would make the biggest difference for their family. 
-                     Reference their specific situation and show understanding of their needs.`;
-            break;
-            
-        default:
-            return "What's most important to you in choosing the right community for your loved one?";
-    }
-    
-    try {
-        const response = await generateText({
-            runtime: _runtime,
-            context: prompt,
-            modelClass: ModelClass.SMALL
-        });
-        
-        return response || getDefaultPriorityQuestion(questionType);
-    } catch (error) {
-        elizaLogger.error(`Error generating personalized priority question: ${error}`);
-        return getDefaultPriorityQuestion(questionType);
-    }
-}
-
-// Fallback questions if generation fails
-function getDefaultQuestion(questionType: string): string {
-    switch (questionType) {
-        case "daily_routine":
-            return "Thank you for sharing so openly — I can tell how much you care. Let's talk about your loved one. What does a typical day look like for them?";
-        case "activities":
-            return "Thank you, It sounds like you know your loved one so well, and that's truly wonderful. Could you tell me what are some things they love doing?";
-        case "stopped_activities":
-            return "Thank you for helping me understand them better — I can see how much their happiness means to you. Sometimes, as life changes, our loved ones step away from things they used to love. What's something they've always enjoyed but may have stopped doing recently?";
-        default:
-            return "Could you tell me more about your loved one?";
-    }
-}
-
-// Fallback readiness questions if generation fails
-function getDefaultReadinessQuestion(questionType: string): string {
-    switch (questionType) {
-        case "awareness":
-            return "Ok, Looks great. I can feel that you really care your family. Can I ask you if your Mom or Dad aware that you're looking at options?";
-        case "feelings":
-            return "Great, I can feel that you really care your family. How do they feel about the idea of moving?";
-        default:
-            return "How does your loved one feel about exploring senior living options?";
-    }
-}
-
-// Fallback priority questions if generation fails
-function getDefaultPriorityQuestion(questionType: string): string {
-    switch (questionType) {
-        case "community_values":
-            return "Finding the right community can make all the difference in feeling at home and supported. We want to make sure the place you choose truly fits your family's needs and values. What's most important to you in the community you choose?";
-        case "support_needs":
-            return "Everyone's needs are different, and the right kind of support can really ease the transition. We want to understand what would help your family feel comfortable and cared for every step of the way. What kind of support do you feel would make the biggest difference for your family?";
-        default:
-            return "What's most important to you in choosing the right community for your loved one?";
-    }
-}
-
 async function handleGeneralInquiry(_runtime: IAgentRuntime, _message: Memory, _state: State, gracePersonality: string, grandVillaInfo: string): Promise<string> {
     return "I'd be happy to help you learn more about Grand Villa. What would you like to know?";
-}
-
-// Helper function to get stored visit timing information
-async function getVisitTimingInfo(_runtime: IAgentRuntime, _message: Memory): Promise<{preferredDay?: string, preferredTime?: string, specificDate?: string} | null> {
-    let visitTimingArray: string[] = [];
-    
-    try {
-        const userResponses = await getUserResponses(_runtime, _message);
-        elizaLogger.info(`getVisitTimingInfo - userResponses: ${JSON.stringify(userResponses)}`);
-        
-        visitTimingArray = userResponses.visit_timing || [];
-        elizaLogger.info(`getVisitTimingInfo - visitTimingArray length: ${visitTimingArray.length}`);
-        elizaLogger.info(`getVisitTimingInfo - visitTimingArray: ${JSON.stringify(visitTimingArray)}`);
-        
-        if (visitTimingArray.length > 0) {
-            const latestVisitTiming = visitTimingArray[visitTimingArray.length - 1];
-            elizaLogger.info(`getVisitTimingInfo - latestVisitTiming (raw): ${latestVisitTiming}`);
-            
-            // Handle the messy format: "[Discovery Response] {"preferredDay":"...","preferredTime":"...","specificDate":"..."}"
-            let cleanJsonString = latestVisitTiming;
-            
-            // If it starts with "[Discovery Response]", extract the JSON part
-            if (typeof cleanJsonString === 'string' && cleanJsonString.includes('[Discovery Response]')) {
-                const jsonStart = cleanJsonString.indexOf('{');
-                if (jsonStart !== -1) {
-                    cleanJsonString = cleanJsonString.substring(jsonStart);
-                    elizaLogger.info(`getVisitTimingInfo - extracted JSON part: ${cleanJsonString}`);
-                }
-            }
-            
-            const parsed = JSON.parse(cleanJsonString);
-            elizaLogger.info(`getVisitTimingInfo - parsed: ${JSON.stringify(parsed)}`);
-            elizaLogger.info(`Retrieved visit timing info: Preferred Day=${parsed.preferredDay}, Preferred Time=${parsed.preferredTime}, Specific Date=${parsed.specificDate}`);
-            return { preferredDay: parsed.preferredDay, preferredTime: parsed.preferredTime, specificDate: parsed.specificDate };
-        }
-        
-        elizaLogger.info(`getVisitTimingInfo - no visit timing info found`);
-    } catch (error) {
-        elizaLogger.error("Error retrieving visit timing info:", error);
-        elizaLogger.error("Raw visit timing info that failed to parse:", visitTimingArray);
-    }
-    
-    return null;
-}
-
-// Helper function to safely extract and parse JSON from AI response
-function safeParseAIResponse(response: string): { responseText: string; status: string } {
-    try {
-        // First, try direct parse
-        const parsed = JSON.parse(response);
-        return {
-            responseText: parsed.response || '',
-            status: parsed.status || 'Normal situation'
-        };
-    } catch (error) {
-        // If direct parse fails, try to extract JSON object from text
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            try {
-                const parsed = JSON.parse(jsonMatch[0]);
-                return {
-                    responseText: parsed.response || '',
-                    status: parsed.status || 'Normal situation'
-                };
-            } catch (innerError) {
-                elizaLogger.error("Failed to parse extracted JSON:", innerError);
-            }
-        }
-        elizaLogger.error("Failed to parse AI response:", error);
-        return {
-            responseText: '',
-            status: 'Normal situation'
-        };
-    }
 }

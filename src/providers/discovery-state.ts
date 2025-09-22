@@ -53,7 +53,6 @@ export const discoveryStateProvider: Provider = {
         // Process messages from oldest to newest to preserve latest stage transitions
         for (const mem of existingState.reverse()) {
             const text = mem.content.text?.toLowerCase() || "";
-            elizaLogger.info(`Processing message: ${text}`);
             
             // Check for stage in metadata first
             const metadata = mem.content.metadata as MessageMetadata | undefined;
