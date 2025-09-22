@@ -2235,7 +2235,10 @@ async function handleScheduleVisit(
         roomId: roomId as `${string}-${string}-${string}-${string}-${string}`,
         count: 60,
       });
-      for (let i = mems.length - 1; i >= 0; i--) {
+      for (let i = mems.length - 1; i >= 0; i--) {      const mems = await _runtime.messageManager.getMemories({
+        roomId: roomId as `${string}-${string}-${string}-${string}-${string}`,
+        count: 60,
+      });
         const md = mems[i]?.content?.metadata as any;
         if (md?.stage === "schedule_visit") {
           if (md?.visit_scheduled && md?.eventId && md?.startIso) return { status: "booked", eventId: md.eventId, startIso: md.startIso, email: md.email };
@@ -2311,21 +2314,51 @@ async function handleScheduleVisit(
     
     // Main process logging
     elizaLogger.info(`MAIN PROCESS: userText="${userText}", ctx.status="${ctx.status}", isStageEnter=${isStageEnter}`);
+    const userName = await getUserFirstName(_runtime, _message);
+    let responseText = "";
     
     // ---------- First-time entry check ----------
     // If this is a stage transition, show initial prompt regardless of previous context
     // This ensures the initial prompt is always shown when entering the schedule_visit stage
     if (isStageEnter) {
       elizaLogger.info("PROCESS: Stage transition to schedule_visit → showing initial prompt");
-      const prompt =
-        `Diana can do ${defaultWhen}. ` +
-        `Does that time work? If YES, please enter your email. If NO, please reply with a new day & time (e.g., "Wed 4pm").Please note visit time must be between 10am-5pm Monday-Friday.`;
-      await _runtime.messageManager.createMemory({
-        roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
-        content: { text: prompt, metadata: { stage: "schedule_visit", proposedStartIso: defaultIso, awaiting_email: false } },
-      });
+      const prompt = `
+        The user${userName ? ` (${userName})` : ''} has just moved to the "schedule visit" stage. 
+        However, the user's last message may include a question, concern, or complaint: ${userText}.
+        Respond politely and helpfully, using the details from ${_grandVillaInfo}. 
+        And keep the words under 30~40 and don't say "Hi".
+
+        After addressing the user, continue with this message:
+        "Diana is available ${defaultWhen}. Does that time work? 
+        If YES, please provide your email. 
+        If NO, reply with a new day & time (e.g., 'Wed 4pm'). 
+        Please note: visits are only available between 10am–5pm, Monday–Friday."
+        `;
+       
+       try{
+        const aiResponse = await generateText({
+            runtime: _runtime,
+            context: prompt,
+            modelClass: ModelClass.MEDIUM
+        });
+        responseText = aiResponse;
+        //save to database
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+            content: { text: aiResponse, metadata: { stage: "schedule_visit", proposedStartIso: defaultIso, awaiting_email: false } },
+          });
+       } catch(error) {
+        const fallbackResponse = `Diana can do ${defaultWhen}. Does that time work? If YES, please enter your email. If NO, please reply with a new day & time (e.g., "Wed 4pm").Please note visit time must be between 10am-5pm Monday-Friday.`;
+        responseText = fallbackResponse;
+        await _runtime.messageManager.createMemory({
+            roomId: _message.roomId, userId: _message.userId, agentId: _message.agentId,
+            content: { text: fallbackResponse, metadata: { stage: "schedule_visit", proposedStartIso: defaultIso, awaiting_email: false } },
+          });
+       }
+
+      
       setGlobalResponseStatus("Normal situation");
-      return prompt;
+      return responseText;
     }
      // ---------- Stage-enter suppression while waiting ----------
     if (isStageEnter && (ctx.status === "awaiting_email" || ctx.status === "awaiting_alt_time")) {
