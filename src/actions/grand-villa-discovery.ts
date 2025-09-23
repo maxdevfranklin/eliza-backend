@@ -2520,17 +2520,19 @@ async function handleStepFive(
 ): Promise<string> {
     // The conversation has ended, respond generally to user's last response
     const generalResponseContext = `
-    The user responded: "${lastUserText}"
-    This is after we've completed the visit scheduling process.
-    Their name is ${userName || "the guest"} and their loved one is ${lovedOneName}.
-    
-    Task: Provide a natural, helpful response to their message. Be warm and conversational.
-    Refer the information about Grand Villa, ${grandVillaInfo}.
-    If they have questions about the visit or Grand Villa, answer them helpfully.
-    Keep it under 50 words and maintain the friendly, supportive tone.
-    
-    Return only the response text.
-    `;
+        The user responded: "${lastUserText}"
+        This is after we've completed the visit scheduling process.
+        Their name is ${userName || "the guest"} and their loved one is ${lovedOneName}.
+        Reference information about Grand Villa: ${grandVillaInfo}
+
+        Task: Provide a warm, supportive closing-style response to their message.
+        - Do not start with greetings, it's the last step of conversation (no "Hi" or "Hello").
+        - Be natural, concise, and under 50 words.
+        - If they have questions about the visit or Grand Villa, answer them helpfully.
+        - Keep the tone friendly, grateful, and final since this is the last step of the conversation.
+
+        Return only the response text.
+        `;
 
     return await generateResponse(_runtime, generalResponseContext) ||
         `${userName ? `${userName}, ` : ''}I'm here if you have any other questions about your visit or Grand Villa. Looking forward to seeing you Wednesday!`;
