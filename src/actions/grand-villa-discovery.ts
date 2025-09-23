@@ -2173,7 +2173,13 @@ async function handleScheduleVisit(_runtime: IAgentRuntime, _message: Memory, _s
             response = await handleStepTwo(_runtime, _message, userName, lovedOneName, grandVillaInfo, lastUserText);
             break;
         case 3:
-            response = await handleStepThree(_runtime, _message, userName, lovedOneName, lastUserText);
+            response = await handleStepThree(_runtime, _message, userName, lovedOneName, lastUserText, grandVillaInfo);
+            break;
+        case 4:
+            response = await handleStepFour(_runtime, _message, userName, lovedOneName, lastUserText);
+            break;
+        case 5:
+            response = await handleStepFive(_runtime, _message, userName, lovedOneName, lastUserText, grandVillaInfo);
             break;
         default:
             response = `${userName ? `${userName}, ` : ''}I'd love to help you schedule a visit to Grand Villa. Would you be interested in seeing our community in person?`;
@@ -2198,7 +2204,9 @@ async function getVisitStepStatus(_runtime: IAgentRuntime, _message: Memory): Pr
     const hasAgreedToVisit = visitEntries.some(entry => entry.question === "visit_agreement");
     const hasConfirmedTime = visitEntries.some(entry => entry.question === "time_confirmation");
     const hasProvidedEmail = visitEntries.some(entry => entry.question === "email_collection");
+    const hasProvidedReferral = visitEntries.some(entry => entry.question === "referral_source");
     
+    if (hasProvidedReferral) return {currentStep: 5, isInitial: false};
     if (hasProvidedEmail) return {currentStep: 4, isInitial: false}; // Done
     if (hasConfirmedTime) return {currentStep: 3, isInitial: false}; // Email step
     if (hasAgreedToVisit) return {currentStep: 2, isInitial: false}; // Time step
@@ -2378,13 +2386,13 @@ async function handleStepTwo(
   }
 
 // Step 3: Email collection
-// Step 3: Email collection
 async function handleStepThree(
     _runtime: IAgentRuntime,
     _message: Memory,
     userName: string,
     lovedOneName: string,
-    lastUserText: string
+    lastUserText: string,
+    grandVillaInfo: string
   ): Promise<string> {
     // Ask AI to extract email
     const analysisContext = `
@@ -2432,16 +2440,18 @@ async function handleStepThree(
         });
       
         const goodbyeContext = `
-        The user's name is ${userName || "the guest"} and their loved one is ${lovedOneName}.
-        We just confirmed their email: ${email}.
-        Task:
-        - Write a warm, natural closing message under 50 words.
-        - Confirm we’ll send a confirmation email shortly.
-        - Express genuine gratitude and excitement about welcoming them and ${lovedOneName} to Grand Villa.
-        - Keep it friendly, conversational, and final (no more questions).
-        - Say goodbye and see you later.
-        Return only the message text.
-        `;
+            The user's name is ${userName || "the guest"} and their loved one is ${lovedOneName}.
+            We just confirmed their email: ${email}.
+            Reference information about Grand Villa: ${grandVillaInfo}
+
+            Task:
+            - Write a warm, natural closing message under 50 words.
+            - Confirm we’ll send a confirmation email to ${email} shortly.
+            - Express genuine gratitude and excitement about welcoming ${userName} and ${lovedOneName} to Grand Villa, weaving in details from {grandvillainfo} where natural.
+            - Keep it friendly, conversational, and final (no more questions about logistics).
+            - Smoothly transition into asking how they first heard about Grand Villa or what brought them to us, so it feels natural and inviting.
+            Return only the message text.
+            `;
       
         return await generateResponse(_runtime, goodbyeContext) ||
           `Perfect! I've got you all set up with ${email}. You'll receive a confirmation email shortly with all the visit details. Thank you ${userName ? userName : ''}, and I look forward to welcoming you and ${lovedOneName} to Grand Villa soon!`;
@@ -2461,6 +2471,71 @@ async function handleStepThree(
       return `${userName ? `${userName}, ` : ''}could you please share your email so I can send the visit confirmation and details?`;
     }
   }
+
+async function handleStepFour(
+    _runtime: IAgentRuntime,
+    _message: Memory,
+    userName: string,
+    lovedOneName: string,
+    lastUserText: string
+): Promise<string> {
+    const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
+    const visitEntries = comprehensiveRecord?.visit_scheduling || [];
+    const timeConfirmationEntry = visitEntries.find(entry => entry.question === "time_confirmation");
+    const confirmedTime = timeConfirmationEntry?.answer || "Wednesday at 5pm"; 
+
+    await updateComprehensiveRecord(_runtime, _message, {
+        visit_scheduling: [{
+            question: "referral_source",
+            answer: lastUserText,
+            timestamp: new Date().toISOString()
+        }]
+    });
+    const finalContext = `
+    The user just told hos how they heard about Grand Villa: ${lastUserText}
+    User's name is ${userName} and their loved one is ${lovedOneName}.
+    
+    Task: Write a warm, natural final message that:
+    1. Acknowledges their referral source naturally
+    2. Mentions that when they visit, the community team will show them around and answer questions about care levels and pricing
+    3. Expresses gratitude for trusting you to help guide them through this important decision for ${lovedOneName}
+    4. Confirms you look forward to seeing them ${confirmedTime}
+    5. Keep it conversational and under 60 words
+    6. Make it feel like a natural conclusion to the conversation
+    
+    Return only the message text.
+    `
+    return await generateResponse(_runtime, finalContext) ||
+    `${userName ? `${userName}, ` : ''}When you visit, our community team will show you around and can answer any specific questions about care levels and pricing. Thank you for trusting me to help guide you through this important decision for ${lovedOneName}. I look forward to seeing you Wednesday.`;
+}
+
+// Step 5: Final conversation handling
+async function handleStepFive(
+    _runtime: IAgentRuntime,
+    _message: Memory,
+    userName: string,
+    lovedOneName: string,
+    lastUserText: string,
+    grandVillaInfo: string
+): Promise<string> {
+    // The conversation has ended, respond generally to user's last response
+    const generalResponseContext = `
+    The user responded: "${lastUserText}"
+    This is after we've completed the visit scheduling process.
+    Their name is ${userName || "the guest"} and their loved one is ${lovedOneName}.
+    
+    Task: Provide a natural, helpful response to their message. Be warm and conversational.
+    Refer the information about Grand Villa, ${grandVillaInfo}.
+    If they have questions about the visit or Grand Villa, answer them helpfully.
+    Keep it under 50 words and maintain the friendly, supportive tone.
+    
+    Return only the response text.
+    `;
+
+    return await generateResponse(_runtime, generalResponseContext) ||
+        `${userName ? `${userName}, ` : ''}I'm here if you have any other questions about your visit or Grand Villa. Looking forward to seeing you Wednesday!`;
+}
+
 
 // Simple AI response generator
 async function generateResponse(_runtime: IAgentRuntime, context: string): Promise<string | null> {
