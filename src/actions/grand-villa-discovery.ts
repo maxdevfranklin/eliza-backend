@@ -1180,6 +1180,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         === CLASSIFICATION RULES ===
         Classify as "Unexpected situation" if the message contains:
         • Any question or curiosity about something
+        • Worries that can be related to Grand Villa community
         • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
         • Requests for extra details about pricing, services, amenities, locations, or policies
         • Expressions of frustration, confusion, or complaints ("too many questions", "when can I get information?")
@@ -1229,17 +1230,18 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         ` : `
         2. For "Unexpected situation":
         - Look at the last message: "${_message.content.text}".
-        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If info is missing, search online and give the most accurate answer.
-        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
-        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
-        - If it's a pricing question:
-            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
-            • Add that pricing depends on the level of care and services chosen.  
-            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
-        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - If the message contains a question or curiosity, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+          If info is missing, search online and give the most accurate answer.
+        - If the message indicates that the user's loved one might be a good fit for Grand Villa (based on their preferences, needs, lifestyle, or interests), naturally highlight how Grand Villa matches those needs.  
+          For example, link their hobbies, activities, or care requirements to relevant services, programs, or amenities in grandvilla_information.
+        - Never share exact pricing or pricing-related details unless the user directly asks about pricing.
+        - If it’s a pricing question:
+            • Share the pricing for the closest Grand Villa to "${location}" using exact details from grandvilla_information.  
+            • Mention that pricing depends on the level of care and services chosen.  
+            • Suggest visiting the community in person for the most accurate understanding of costs.
+        - If the user complains about too many questions or timing, empathize, explain why these questions are asked, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 50–70 words.
+        - Keep the response concise, around 50–70 words.
         `}
 
         Return ONLY the response text, no JSON formatting.`;
@@ -1411,11 +1413,12 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         === CLASSIFICATION RULES ===
         Classify as "Unexpected situation" if the message contains:
         • Any question or curiosity about something
+        • Worries that can be related to Grand Villa community
         • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
         • Requests for extra details about pricing, services, amenities, locations, or policies
-        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when can I get information?")
         • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
-        
+                
         Otherwise, classify as "Normal situation".
         
         Return ONLY a JSON object:
@@ -1460,17 +1463,18 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         ` : `
         2. For "Unexpected situation":
         - Look at the last message: "${lastUserText}".
-        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If info is missing, search online and give the most accurate answer.
-        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
-        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
-        - If it's a pricing question:
-            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
-            • Add that pricing depends on the level of care and services chosen.  
-            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
-        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - If the message contains a question or curiosity, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+          If info is missing, search online and give the most accurate answer.
+        - If the message indicates that the user's loved one might be a good fit for Grand Villa (based on their preferences, needs, lifestyle, or interests), naturally highlight how Grand Villa matches those needs.  
+          For example, link their hobbies, activities, or care requirements to relevant services, programs, or amenities in grandvilla_information.
+        - Never share exact pricing or pricing-related details unless the user directly asks about pricing.
+        - If it’s a pricing question:
+            • Share the pricing for the closest Grand Villa to "${location}" using exact details from grandvilla_information.  
+            • Mention that pricing depends on the level of care and services chosen.  
+            • Suggest visiting the community in person for the most accurate understanding of costs.
+        - If the user complains about too many questions or timing, empathize, explain why these questions are asked, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 50–70 words.
+        - Keep the response concise, around 50–70 words.
         `}
 
         Return ONLY the response text, no JSON formatting.`;
@@ -1652,11 +1656,12 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         === CLASSIFICATION RULES ===
         Classify as "Unexpected situation" if the message contains:
         • Any question or curiosity about something
+        • Worries that can be related to Grand Villa community
         • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
         • Requests for extra details about pricing, services, amenities, locations, or policies
-        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when can I get information?")
         • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
-        
+                
         Otherwise, classify as "Normal situation".
         
         Return ONLY a JSON object:
@@ -1701,17 +1706,18 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         ` : `
         2. For "Unexpected situation":
         - Look at the last message: "${lastUserText}".
-        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If info is missing, search online and give the most accurate answer.
-        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
-        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
-        - If it's a pricing question:
-            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
-            • Add that pricing depends on the level of care and services chosen.  
-            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
-        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - If the message contains a question or curiosity, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+          If info is missing, search online and give the most accurate answer.
+        - If the message indicates that the user's loved one might be a good fit for Grand Villa (based on their preferences, needs, lifestyle, or interests), naturally highlight how Grand Villa matches those needs.  
+          For example, link their hobbies, activities, or care requirements to relevant services, programs, or amenities in grandvilla_information.
+        - Never share exact pricing or pricing-related details unless the user directly asks about pricing.
+        - If it’s a pricing question:
+            • Share the pricing for the closest Grand Villa to "${location}" using exact details from grandvilla_information.  
+            • Mention that pricing depends on the level of care and services chosen.  
+            • Suggest visiting the community in person for the most accurate understanding of costs.
+        - If the user complains about too many questions or timing, empathize, explain why these questions are asked, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 50–70 words.
+        - Keep the response concise, around 50–70 words.
         `}
 
         Return ONLY the response text, no JSON formatting.`;
@@ -1892,11 +1898,12 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         === CLASSIFICATION RULES ===
         Classify as "Unexpected situation" if the message contains:
         • Any question or curiosity about something
+        • Worries that can be related to Grand Villa community
         • Phrases like "I'd like to know…", "tell me…", "can you explain…", "curious about…"
         • Requests for extra details about pricing, services, amenities, locations, or policies
-        • Expressions of frustration, confusion, or complaints ("too many questions", "when does this end?")
+        • Expressions of frustration, confusion, or complaints ("too many questions", "when can I get information?")
         • Sharing about loved one's likes, interests, hobbies, activities they enjoy, things they love doing, or activities they used to do
-        
+                
         Otherwise, classify as "Normal situation".
         
         Return ONLY a JSON object:
@@ -1941,17 +1948,18 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         ` : `
         2. For "Unexpected situation":
         - Look at the last message: "${lastUserText}".
-        - If it's a question, answer clearly using grandvilla_information: "${grandVillaInfo}".  
-            If info is missing, search online and give the most accurate answer.
-        - If it's about the loved one's likes, interests, hobbies or activities they enjoy or used to, find the similar activities or services in grandvilla_information and match their needs naturally.
-        - Never share about exact pricing or pricing-related answers unless the user directly asks about pricing.
-        - If it's a pricing question:
-            • Share the pricing for the closest Grand Villa to "${location}" using the exact details from grandvilla_information.  
-            • Add that pricing depends on the level of care and services chosen.  
-            • Suggest that visiting the community in person will give the most accurate understanding of costs.  
-        - If they complain about too many questions or timing, empathize, explain why we ask these, and lighten the mood with a friendly or humorous remark.
+        - If the message contains a question or curiosity, answer clearly using grandvilla_information: "${grandVillaInfo}".  
+          If info is missing, search online and give the most accurate answer.
+        - If the message indicates that the user's loved one might be a good fit for Grand Villa (based on their preferences, needs, lifestyle, or interests), naturally highlight how Grand Villa matches those needs.  
+          For example, link their hobbies, activities, or care requirements to relevant services, programs, or amenities in grandvilla_information.
+        - Never share exact pricing or pricing-related details unless the user directly asks about pricing.
+        - If it’s a pricing question:
+            • Share the pricing for the closest Grand Villa to "${location}" using exact details from grandvilla_information.  
+            • Mention that pricing depends on the level of care and services chosen.  
+            • Suggest visiting the community in person for the most accurate understanding of costs.
+        - If the user complains about too many questions or timing, empathize, explain why these questions are asked, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep response within 50–70 words.
+        - Keep the response concise, around 50–70 words.
         `}
 
         Return ONLY the response text, no JSON formatting.`;
