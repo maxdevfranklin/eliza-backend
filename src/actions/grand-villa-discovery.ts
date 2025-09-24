@@ -2447,9 +2447,9 @@ async function handleStepThree(
             Task:
             - Write a warm, natural closing message under 50 words.
             - Confirm we’ll send a confirmation email to ${email} shortly.
-            - Express genuine gratitude and excitement about welcoming ${userName} and ${lovedOneName} to Grand Villa, weaving in details from {grandvillainfo} where natural.
+            - Express genuine gratitude and excitement about welcoming ${userName} and ${lovedOneName} to Grand Villa
             - Keep it friendly, conversational, and final (no more questions about logistics).
-            - Smoothly transition into asking how they first heard about Grand Villa or what brought them to us, so it feels natural and inviting.
+            - Smoothly transition into asking how they first heard about Grand Villa or what brought them to us, so it feels natural and inviting and END THE CONVERSATION WITH THAT QUESTION!!
             Return only the message text.
             `;
       
