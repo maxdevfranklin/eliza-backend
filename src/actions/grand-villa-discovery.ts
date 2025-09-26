@@ -1242,7 +1242,7 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
             • Suggest visiting the community in person for the most accurate understanding of costs.
         - If the user complains about too many questions or timing, empathize, explain why these questions are asked, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep the response concise, around 50–70 words.
+        - Keep the response concise, around 30–50 words.
         `}
 
         Return ONLY the response text, no JSON formatting.`;
@@ -1782,8 +1782,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
 async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string, lastUserMessage: string): Promise<string> {
     // The 3 priority questions we need to collect answers for
     const priorityQuestions = [
-        "What's most important to you regarding the community you may choose?",
-        "What would make you feel confident that this is the right decision for your family?"
+        "What's most important to you regarding the community you may choose?"
     ];
     
     // Save user response from this stage
