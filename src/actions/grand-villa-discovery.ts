@@ -1,5 +1,6 @@
 import { Action, generateText, IAgentRuntime, Memory, ModelClass, State, HandlerCallback, elizaLogger } from "@elizaos/core";
 import { discoveryStateProvider, saveUserResponse, getUserResponses, updateUserStatus } from "../providers/discovery-state.js";
+import { EmailService } from "../utils/email-service.js";
 
 
 
@@ -1235,13 +1236,13 @@ async function handleSituationQuestions(_runtime: IAgentRuntime, _message: Memor
         - If the message indicates that the user's loved one might be a good fit for Grand Villa (based on their preferences, needs, lifestyle, or interests), naturally highlight how Grand Villa matches those needs.  
           For example, link their hobbies, activities, or care requirements to relevant services, programs, or amenities in grandvilla_information.
         - Never share exact pricing or pricing-related details unless the user directly asks about pricing.
-        - If it’s a pricing question:
+        - If it's a pricing question:
             • Share the pricing for the closest Grand Villa to "${location}" using exact details from grandvilla_information.  
             • Mention that pricing depends on the level of care and services chosen.  
             • Suggest visiting the community in person for the most accurate understanding of costs.
         - If the user complains about too many questions or timing, empathize, explain why these questions are asked, and lighten the mood with a friendly or humorous remark.
         - Smoothly connect back to "${nextQuestion}" in a natural, conversational way.
-        - Keep the response concise, around 50–70 words.
+        - Keep the response concise, around 30–50 words.
         `}
 
         Return ONLY the response text, no JSON formatting.`;
@@ -1468,7 +1469,7 @@ async function handleLifestyleQuestions(_runtime: IAgentRuntime, _message: Memor
         - If the message indicates that the user's loved one might be a good fit for Grand Villa (based on their preferences, needs, lifestyle, or interests), naturally highlight how Grand Villa matches those needs.  
           For example, link their hobbies, activities, or care requirements to relevant services, programs, or amenities in grandvilla_information.
         - Never share exact pricing or pricing-related details unless the user directly asks about pricing.
-        - If it’s a pricing question:
+        - If it's a pricing question:
             • Share the pricing for the closest Grand Villa to "${location}" using exact details from grandvilla_information.  
             • Mention that pricing depends on the level of care and services chosen.  
             • Suggest visiting the community in person for the most accurate understanding of costs.
@@ -1711,7 +1712,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
         - If the message indicates that the user's loved one might be a good fit for Grand Villa (based on their preferences, needs, lifestyle, or interests), naturally highlight how Grand Villa matches those needs.  
           For example, link their hobbies, activities, or care requirements to relevant services, programs, or amenities in grandvilla_information.
         - Never share exact pricing or pricing-related details unless the user directly asks about pricing.
-        - If it’s a pricing question:
+        - If it's a pricing question:
             • Share the pricing for the closest Grand Villa to "${location}" using exact details from grandvilla_information.  
             • Mention that pricing depends on the level of care and services chosen.  
             • Suggest visiting the community in person for the most accurate understanding of costs.
@@ -1781,8 +1782,7 @@ async function handleReadinessQuestions(_runtime: IAgentRuntime, _message: Memor
 async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory, _state: State, discoveryState: any, gracePersonality: string, grandVillaInfo: string, lastUserMessage: string): Promise<string> {
     // The 3 priority questions we need to collect answers for
     const priorityQuestions = [
-        "What's most important to you regarding the community you may choose?",
-        "What would make you feel confident that this is the right decision for your family?"
+        "What's most important to you regarding the community you may choose?"
     ];
     
     // Save user response from this stage
@@ -1953,7 +1953,7 @@ async function handlePriorityQuestions(_runtime: IAgentRuntime, _message: Memory
         - If the message indicates that the user's loved one might be a good fit for Grand Villa (based on their preferences, needs, lifestyle, or interests), naturally highlight how Grand Villa matches those needs.  
           For example, link their hobbies, activities, or care requirements to relevant services, programs, or amenities in grandvilla_information.
         - Never share exact pricing or pricing-related details unless the user directly asks about pricing.
-        - If it’s a pricing question:
+        - If it's a pricing question:
             • Share the pricing for the closest Grand Villa to "${location}" using exact details from grandvilla_information.  
             • Mention that pricing depends on the level of care and services chosen.  
             • Suggest visiting the community in person for the most accurate understanding of costs.
@@ -2263,7 +2263,7 @@ async function handleStepOne(_runtime: IAgentRuntime, _message: Memory, userName
                 Output:
                 - If {"agreed": true}, respond to the user's message in a natural, conversational way (acknowledge or engage with what they said), and then smoothly ask:
                 would Wednesday at 5pm work for you to visit?, keep the words under 50.
-                - If {"agreed": false}, return a natural response to the user’s message without suggesting a time.
+                - If {"agreed": false}, return a natural response to the user's message without suggesting a time.
 
                 Return ONLY a JSON object in this format:
                 {"agreed": true/false, "response": "your natural response here"}`;
@@ -2292,14 +2292,14 @@ async function handleStepOne(_runtime: IAgentRuntime, _message: Memory, userName
             Full conversation history with the user is: ${allPreviousAnswers}  
 
             Task:  
-            - Carefully analyze the user’s past answers to find their key concerns, curiosities, or things they seemed to like.  
+            - Carefully analyze the user's past answers to find their key concerns, curiosities, or things they seemed to like.  
             - Use that context to craft a reply that feels personal, empathetic, and relevant.  
 
             Your response must:  
             1. Acknowledge their latest message in a natural, human way.  
             2. Directly connect to one of their past concerns, curiosities, or likes.  
             3. Explain briefly why actually visiting Grand Villa (using this info: "${grandVillaInfo}") would help them explore or resolve that point.  
-            4. Encourage them to come see it in person for ${lovedOneName}, framed as the best way to know if it’s the right fit.  
+            4. Encourage them to come see it in person for ${lovedOneName}, framed as the best way to know if it's the right fit.  
             5. Keep it under 50 words, friendly and conversational.  
             6. Avoid generic greetings (like "Hi" or "Hello") since this is near the end of the conversation.  
 
@@ -2401,7 +2401,7 @@ async function handleStepThree(
     lovedOneName: string,
     lastUserText: string,
     grandVillaInfo: string
-  ): Promise<string> {
+): Promise<string> {
     // Ask AI to extract email
     const analysisContext = `
     Analyze the following user response: "${lastUserText}"
@@ -2409,7 +2409,7 @@ async function handleStepThree(
     Output JSON only:
     {"email": "normalized email string or null", "reasoning": "short explanation"}
     `;
-  
+
     try {
         const analysis = await generateText({
             runtime: _runtime,
@@ -2428,57 +2428,70 @@ async function handleStepThree(
         }
         
         const result = JSON.parse(cleanedAnalysis);
-  
-      // Fallback regex detection if AI fails
-      let email = result.email;
-      if (!email) {
-        const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/;
-        const emailMatch = lastUserText.match(emailRegex);
-        if (emailMatch) email = emailMatch[0];
-      }
-  
-      if (email) {
-        // Email found — save and complete
-        await updateComprehensiveRecord(_runtime, _message, {
-          visit_scheduling: [{
-            question: "email_collection",
-            answer: email,
-            timestamp: new Date().toISOString()
-          }]
-        });
-      
-        const goodbyeContext = `
-            The user's name is ${userName || "the guest"} and their loved one is ${lovedOneName}.
-            We just confirmed their email: ${email}.
-            Reference information about Grand Villa: ${grandVillaInfo}
 
-            Task:
-            - Write a warm, natural closing message under 50 words.
-            - Confirm we’ll send a confirmation email to ${email} shortly.
-            - Express genuine gratitude and excitement about welcoming ${userName} and ${lovedOneName} to Grand Villa
-            - Keep it friendly, conversational, and final (no more questions about logistics).
-            - Smoothly transition into asking how they first heard about Grand Villa or what brought them to us, so it feels natural and inviting and END THE CONVERSATION WITH THAT QUESTION!!
-            Return only the message text.
-            `;
-      
-        return await generateResponse(_runtime, goodbyeContext) ||
-          `Perfect! I've got you all set up with ${email}. You'll receive a confirmation email shortly with all the visit details. Thank you ${userName ? userName : ''}, and I look forward to welcoming you and ${lovedOneName} to Grand Villa soon!`;
-      }
-  
-      // No valid email found — politely ask again
-      const emailContext = `
-      The user responded: "${lastUserText}" but didn't provide a valid email.
-      Create a warm, polite response asking for their email to send the visit confirmation.
-      Keep it natural, friendly, and under 40 words.
-      `;
-      return await generateResponse(_runtime, emailContext) ||
-        `${userName ? `${userName}, ` : ''}I'll need your email address to send you the visit confirmation and details. What email should I use?`;
-  
+        // Fallback regex detection if AI fails
+        let email = result.email;
+        if (!email) {
+            const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/;
+            const emailMatch = lastUserText.match(emailRegex);
+            if (emailMatch) email = emailMatch[0];
+        }
+
+        if (email) {
+            // Email found — save and complete
+            await updateComprehensiveRecord(_runtime, _message, {
+                visit_scheduling: [{
+                    question: "email_collection",
+                    answer: email,
+                    timestamp: new Date().toISOString()
+                }]
+            });
+
+            // Send comprehensive records to max.franklin.tech@gmail.com
+            try {
+                const comprehensiveRecord = await getComprehensiveRecord(_runtime, _message);
+                if (comprehensiveRecord) {
+                    await EmailService.sendComprehensiveRecords(email, comprehensiveRecord);
+                    elizaLogger.info("📧 Comprehensive records sent to ", email);
+                } else {
+                    elizaLogger.warn("⚠️ No comprehensive records found to send");
+                }
+            } catch (emailError) {
+                elizaLogger.error("❌ Failed to send comprehensive records:", emailError);
+            }
+
+            const goodbyeContext = `
+                The user's name is ${userName || "the guest"} and their loved one is ${lovedOneName}.
+                We just confirmed their email: ${email}.
+                Reference information about Grand Villa: ${grandVillaInfo}
+
+                Task:
+                - Write a warm, natural closing message under 50 words.
+                - Confirm we'll send a confirmation email to ${email} shortly.
+                - Express genuine gratitude and excitement about welcoming ${userName} and ${lovedOneName} to Grand Villa
+                - Keep it friendly, conversational, and final (no more questions about logistics).
+                - Smoothly transition into asking how they first heard about Grand Villa or what brought them to us, so it feels natural and inviting and END THE CONVERSATION WITH THAT QUESTION!!
+                Return only the message text.
+                `;
+
+            return await generateResponse(_runtime, goodbyeContext) ||
+                `Perfect! I've got you all set up with ${email}. You'll receive a confirmation email shortly with all the visit details. Thank you ${userName ? userName : ''}, and I look forward to welcoming you and ${lovedOneName} to Grand Villa soon!`;
+        }
+
+        // No valid email found — politely ask again
+        const emailContext = `
+        The user responded: "${lastUserText}" but didn't provide a valid email.
+        Create a warm, polite response asking for their email to send the visit confirmation.
+        Keep it natural, friendly, and under 40 words.
+        `;
+        return await generateResponse(_runtime, emailContext) ||
+            `${userName ? `${userName}, ` : ''}I'll need your email address to send you the visit confirmation and details. What email should I use?`;
+
     } catch (error) {
-      elizaLogger.error("Error in step three analysis:", error);
-      return `${userName ? `${userName}, ` : ''}could you please share your email so I can send the visit confirmation and details?`;
+        elizaLogger.error("Error in step three analysis:", error);
+        return `${userName ? `${userName}, ` : ''}could you please share your email so I can send the visit confirmation and details?`;
     }
-  }
+}
 
 async function handleStepFour(
     _runtime: IAgentRuntime,
