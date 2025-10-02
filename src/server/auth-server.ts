@@ -96,6 +96,13 @@ export class AuthServer {
         return true;
       }
 
+      if (pathname === '/auth/session-reset' && req.method === 'POST') {
+        const body = await this.parseBody(req);
+        const result = await this.authRoutes.handleSessionReset(body);
+        this.sendJsonResponse(res, result.status, result.data);
+        return true;
+      }
+
       if (pathname === '/auth/delete-history' && req.method === 'DELETE') {
         const body = await this.parseBody(req);
         const result = await this.authRoutes.handleDeleteHistory(body);

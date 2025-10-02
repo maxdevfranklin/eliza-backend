@@ -1,6 +1,7 @@
 import { elizaLogger, IAgentRuntime } from "@elizaos/core";
 import { AuthService, type LoginRequest, type RegisterRequest } from './auth-service.ts';
 import { UserDatabase } from '../database/users.ts';
+import { DiscoveryStateManager } from '../message/state-manager.js';
 
 export class AuthRoutes {
   private authService: AuthService;
@@ -478,6 +479,55 @@ export class AuthRoutes {
           success: false,
           message: 'Internal server error',
           error: error.message
+        }
+      };
+    }
+  }
+
+  // Handle session reset endpoint - resets user session state in memory
+  async handleSessionReset(body: any): Promise<{ status: number; data: any }> {
+    try {
+      const { userId } = body;
+
+      if (!userId) {
+        return {
+          status: 400,
+          data: {
+            success: false,
+            message: 'User ID is required'
+          }
+        };
+      }
+
+      elizaLogger.info(`Resetting user session for username: ${userId}`);
+
+      // Get the state manager instance
+      const stateManager = DiscoveryStateManager.getInstance();
+      
+      // Reset the user session (clears and recreates with fresh state)
+      const freshSession = stateManager.resetUserSession(userId);
+
+      elizaLogger.info(`Successfully reset session for user ${userId}`);
+
+      return {
+        status: 200,
+        data: {
+          success: true,
+          message: 'Session reset successfully',
+          session: {
+            userId: freshSession.userId,
+            currentStage: freshSession.discoveryState.currentStage,
+            createdAt: freshSession.createdAt
+          }
+        }
+      };
+    } catch (error) {
+      elizaLogger.error('Session reset endpoint error:', error);
+      return {
+        status: 500,
+        data: {
+          success: false,
+          message: 'Internal server error'
         }
       };
     }

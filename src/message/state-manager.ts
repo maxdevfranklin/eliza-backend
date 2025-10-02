@@ -288,6 +288,14 @@ export class DiscoveryStateManager {
         userSessions.delete(userId);
     }
     
+    // Reset user session to initial state (clears and recreates)
+    public resetUserSession(userId: string, userName?: string): UserSession {
+        // Clear existing session
+        userSessions.delete(userId);
+        // Create fresh session
+        return this.getUserSession(userId, userName);
+    }
+    
     // Get all user sessions (for debugging)
     public getAllSessions(): Map<string, UserSession> {
         return new Map(userSessions);
