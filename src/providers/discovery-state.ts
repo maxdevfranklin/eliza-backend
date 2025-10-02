@@ -163,7 +163,6 @@ export async function getUserResponses(runtime: IAgentRuntime, message: Memory) 
         }
     }
     
-    elizaLogger.info(`Retrieved user responses: ${JSON.stringify(userResponses)}`);
     return userResponses;
 }
 

@@ -209,12 +209,108 @@ const startAgents = async () => {
       req.pipe(proxyReq, { end: true });
     };
 
+    // Helper function to handle OpenAI API calls using Grand Villa Discovery system
+    const handleOpenAIMessage = async (req: any, res: any) => {
+      try {
+        // Parse request body
+        let body = '';
+        req.on('data', (chunk: any) => {
+          body += chunk.toString();
+        });
+        
+        req.on('end', async () => {
+          try {
+            const { text, userId, userName } = JSON.parse(body);
+            
+            if (!text) {
+              res.statusCode = 400;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'Text is required' }));
+              return;
+            }
+
+            // Get OpenAI API key from environment
+            const openaiApiKey = process.env.OPENAI_API_KEY;
+            if (!openaiApiKey) {
+              res.statusCode = 500;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'OpenAI API key not configured' }));
+              return;
+            }
+
+            // Import and use the Grand Villa Discovery system
+            const { DiscoveryOrchestrator } = await import('./message/discovery-orchestrator.js');
+            const discoveryOrchestrator = new DiscoveryOrchestrator(openaiApiKey);
+            
+            // Generate unique userId if not provided
+            const finalUserId = userId || `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            elizaLogger.info(`🎯 Processing message with Discovery Orchestrator`);
+            elizaLogger.info(`User ID: ${finalUserId}, Message: "${text}", User Name: ${userName || 'N/A'}`);
+            
+            // Process the message through the discovery system
+            const discoveryResponse = await discoveryOrchestrator.processMessage(finalUserId, text, userName);
+            
+            elizaLogger.info(`✅ Discovery response generated:`, discoveryResponse);
+
+            // Return response in the same format as the original API
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+            
+            res.end(JSON.stringify([{
+              text: discoveryResponse.text,
+              sender: 'grace',
+              timestamp: new Date().toISOString(),
+              metadata: {
+                responseStatus: discoveryResponse.metadata.responseStatus,
+                source: 'grand-villa-discovery',
+                stage: discoveryResponse.metadata.stage,
+                actionName: discoveryResponse.metadata.actionName,
+                reliability: discoveryResponse.metadata.reliability
+              }
+            }]));
+
+          } catch (error) {
+            elizaLogger.error('Error processing OpenAI message:', error);
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'Internal server error' }));
+          }
+        });
+      } catch (error) {
+        elizaLogger.error('Error in handleOpenAIMessage:', error);
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    };
+
     // Create main integrated server
     const integratedServer = createServer(async (req, res) => {
       const url = new URL(req.url || '/', `http://${req.headers.host}`);
       const pathname = url.pathname;
 
       elizaLogger.debug(`Request: ${req.method} ${pathname}`);
+
+      // Handle CORS preflight requests
+      if (req.method === 'OPTIONS') {
+        res.statusCode = 200;
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.end();
+        return;
+      }
+
+      // Handle new OpenAI direct message endpoint
+      if (pathname === '/message' && req.method === 'POST') {
+        elizaLogger.debug(`Handling OpenAI direct message: ${pathname}`);
+        await handleOpenAIMessage(req, res);
+        return;
+      }
 
       // Handle auth and agents requests with AuthServer middleware
       if (pathname.startsWith('/auth/') || pathname.startsWith('/agents/')) {
@@ -232,6 +328,7 @@ const startAgents = async () => {
       elizaLogger.info(`Integrated server started on port ${serverPort}`);
       elizaLogger.info("Available endpoints:");
       elizaLogger.info(`  Message API: http://localhost:${serverPort}/{agentId}/message`);
+      elizaLogger.info(`  Message API: http://localhost:${serverPort}/message`);
       elizaLogger.info(`  POST http://localhost:${serverPort}/auth/register`);
       elizaLogger.info(`  POST http://localhost:${serverPort}/auth/login`);
       elizaLogger.info(`  POST http://localhost:${serverPort}/auth/verify`);
