@@ -200,7 +200,7 @@ interface ComprehensiveRecord {
 const rawScheduler =
   process.env.SCHEDULE_URL ||
   process.env.SCHEDULER_URL ||
-  'https://eliza-scheduler-production.up.railway.app/';
+  'https://eliza-scheduler-production.up.railway.app';
 
   type BookingOk = {
     ok: true;

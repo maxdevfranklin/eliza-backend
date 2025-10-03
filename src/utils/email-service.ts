@@ -3,7 +3,7 @@
  * This replaces the direct nodemailer implementation to avoid deployment issues
  */
 export class EmailService {
-    private static readonly SCHEDULER_URL = process.env.SCHEDULE_URL || "http://localhost:4005";
+    private static readonly SCHEDULER_URL = (process.env.SCHEDULE_URL || "http://localhost:4005").replace(/\/+$/, '');
 
     /**
      * Send an email via the scheduler service
