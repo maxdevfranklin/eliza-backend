@@ -1,6 +1,12 @@
 // OpenAI client for the Grand Villa Discovery process
 import { ClassificationResult, AgreementAnalysis, TimeAnalysis, EmailAnalysis } from './types.js';
 
+// Configurable visit time options (should match stage-handlers.ts)
+const VISIT_TIME_OPTIONS = {
+    WEDNESDAY: "Wednesday 5pm",
+    FRIDAY: "Friday 5pm"
+};
+
 export class OpenAIClient {
     private apiKey: string;
     private baseUrl: string = 'https://api.openai.com/v1/chat/completions';
@@ -157,7 +163,7 @@ Rules:
 - If unclear, default to {"agreed": true}.
 
 Output:
-- If {"agreed": true}, acknowledge their agreement briefly and then ask: "How about Wednesday at 5pm? Does that work for you?" Keep it under 30 words.
+- If {"agreed": true}, acknowledge their agreement briefly and then ask: "How about ${VISIT_TIME_OPTIONS.WEDNESDAY} or ${VISIT_TIME_OPTIONS.FRIDAY}? Does either of those work for you?" Keep it under 30 words.
 - If {"agreed": false}, return a natural response to the user's message without suggesting a time.
 
 Return ONLY a JSON object in this format:
@@ -188,10 +194,10 @@ Return ONLY a JSON object in this format:
     
     // Analyze time confirmation
     public async analyzeTimeConfirmation(userMessage: string): Promise<TimeAnalysis> {
-        const context = `Analyze this response about scheduling Wednesday 5pm: "${userMessage}"
+        const context = `Analyze this response about scheduling ${VISIT_TIME_OPTIONS.WEDNESDAY} or ${VISIT_TIME_OPTIONS.FRIDAY}: "${userMessage}"
 Task: Determine scheduling intent.
 Rules:
-- Confirmed = clear acceptance (e.g., "yes, that works", "sounds good", "okay, Wednesday 5pm is fine").
+- Confirmed = clear acceptance (e.g., "yes, that works", "sounds good", "okay, Wednesday 5pm is fine", "Friday works").
 - Alternative = any mention of a different date or time.
 - Rejected = "no", "can't", "doesn't work", without giving alternative.
 - If unclear, default to {"confirmed": false, "rejected": false, "alternative_time": null}.
@@ -421,7 +427,7 @@ Your response must:
 Return only the final conversational response (no explanations).`;
                 break;
             case 2:
-                context = `The user said: "${userMessage}" and rejected Wednesday 5pm without suggesting another time.
+                context = `The user said: "${userMessage}" and rejected ${VISIT_TIME_OPTIONS.WEDNESDAY} or ${VISIT_TIME_OPTIONS.FRIDAY} without suggesting another time.
 Task:
 - Respond naturally, empathetic tone.
 - Mention something helpful about Grand Villa: "${grandVillaInfo}".
@@ -442,7 +448,7 @@ Task: Write a warm, natural final message that:
 1. Acknowledges their referral source naturally
 2. Mentions that when they visit, the community team will show them around and answer questions about care levels and pricing
 3. Expresses gratitude for trusting you to help guide them through this important decision for ${lovedOneName}
-4. Confirms you look forward to seeing them Wednesday
+4. Confirms you look forward to seeing them
 5. Keep it conversational and under 60 words
 6. Make it feel like a natural conclusion to the conversation
 

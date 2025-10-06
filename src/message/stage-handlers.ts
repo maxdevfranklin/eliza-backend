@@ -13,6 +13,12 @@ import {
 } from './types.js';
 import { EmailService } from '../utils/email-service.js';
 
+// Configurable visit time options
+const VISIT_TIME_OPTIONS = {
+    WEDNESDAY: "Wednesday 5pm",
+    FRIDAY: "Friday 5pm"
+};
+
 export class StageHandlers {
     private stateManager: DiscoveryStateManager;
     private openaiClient: OpenAIClient;
@@ -686,7 +692,7 @@ Instead:
         
         if (hasAgreedToVisit) {
             // User already agreed, move to step 2
-            return "Wonderful! How about Wednesday at 5pm? Does that work for you?";
+            return `Wonderful! How about ${VISIT_TIME_OPTIONS.WEDNESDAY} or ${VISIT_TIME_OPTIONS.FRIDAY}? Does either of those work for you?`;
         }
 
         // Get all previous answers from the passed record
@@ -749,11 +755,28 @@ Instead:
     private async handleStepTwo(userId: string, userMessage: string, userName: string, lovedOneName: string, record?: ComprehensiveRecord | null): Promise<string> {
         const analysis = await this.openaiClient.analyzeTimeConfirmation(userMessage);
         
+        // Check if user selected one of our predefined options
+        const userMessageLower = userMessage.toLowerCase();
+        let selectedTime = null;
+        
+        if (userMessageLower.includes('wednesday') || userMessageLower.includes('wed')) {
+            selectedTime = VISIT_TIME_OPTIONS.WEDNESDAY;
+        } else if (userMessageLower.includes('friday') || userMessageLower.includes('fri')) {
+            selectedTime = VISIT_TIME_OPTIONS.FRIDAY;
+        }
+        
+        if (selectedTime) {
+            // User selected one of our predefined times
+            this.stateManager.addQAEntry(userId, DISCOVERY_STAGES.SCHEDULE_VISIT, "time_confirmation", selectedTime);
+            console.log(`✅ User confirmed time: ${selectedTime}`);
+            return `Perfect! ${selectedTime} it is. Which email should I send the calendar invite and visit details to?`;
+        }
+        
         if (analysis.confirmed && !analysis.rejected) {
-            // User confirmed Wednesday 5pm
-            this.stateManager.addQAEntry(userId, DISCOVERY_STAGES.SCHEDULE_VISIT, "time_confirmation", "Wednesday 5pm");
-            console.log(`✅ User confirmed time, saved confirmation.`);
-            return `Perfect! Wednesday at 5pm it is. Which email should I send the calendar invite and visit details to?`;
+            // User confirmed but didn't specify which day - default to Wednesday
+            this.stateManager.addQAEntry(userId, DISCOVERY_STAGES.SCHEDULE_VISIT, "time_confirmation", VISIT_TIME_OPTIONS.WEDNESDAY);
+            console.log(`✅ User confirmed time, defaulting to ${VISIT_TIME_OPTIONS.WEDNESDAY}`);
+            return `Perfect! ${VISIT_TIME_OPTIONS.WEDNESDAY} it is. Which email should I send the calendar invite and visit details to?`;
         }
         
         if (analysis.alternative_time) {
@@ -782,8 +805,8 @@ Instead:
             }
         }
         
-        // Unclear response - ask again
-        return `${userName ? userName + ", " : ""}just to confirm — does Wednesday at 5pm work, or would you like a different time?`;
+        // Unclear response - ask again with both options
+        return `${userName ? userName + ", " : ""}just to confirm — does ${VISIT_TIME_OPTIONS.WEDNESDAY} or ${VISIT_TIME_OPTIONS.FRIDAY} work, or would you like a different time?`;
     }
     
     // Step 3: Email collection
@@ -854,7 +877,7 @@ Instead:
         
         const visitEntries = record?.visit_scheduling || [];
         const timeConfirmationEntry = visitEntries.find(entry => entry.question === "time_confirmation");
-        const confirmedTime = timeConfirmationEntry?.answer || "Wednesday at 5pm";
+        const confirmedTime = timeConfirmationEntry?.answer || VISIT_TIME_OPTIONS.WEDNESDAY;
         
         try {
             const response = await this.openaiClient.generateVisitSchedulingResponse(
@@ -888,7 +911,7 @@ Instead:
             return response;
         } catch (error) {
             console.error("Error generating step five response:", error);
-            return `${userName ? `${userName}, ` : ''}I'm here if you have any other questions about your visit or Grand Villa. Looking forward to seeing you Wednesday!`;
+            return `${userName ? `${userName}, ` : ''}I'm here if you have any other questions about your visit or Grand Villa. Looking forward to seeing you!`;
         }
     }
 }
